@@ -9,6 +9,7 @@ import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 
 import { User } from '../users/entities/user.entity';
+import { Doctor } from '../doctors/entities/doctor.entity';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -17,50 +18,63 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    
+    @InjectRepository(Doctor)
+    private doctorRepo: Repository<Doctor>, // 👈 added for auto-profile
+
     private jwtService: JwtService,
   ) {}
 
   async signup(dto: SignupDto, role: 'doctor' | 'patient') {
     const exists = await this.userRepo.findOne({
-      where: { email: dto.emailID },
+      where: { emailID: dto.emailID }, // emailID maps to 'email' column
     });
-
-    if (exists) {
-      throw new ConflictException('Email already exists');
-    }
+    if (exists) throw new ConflictException('Email already exists');
 
     const hashed = await bcrypt.hash(dto.password, 10);
 
     const user = this.userRepo.create({
-      ...dto,
+      name: dto.name,
+      emailID: dto.emailID,
       password: hashed,
-      role, 
+      role,
     });
-    
-    const saved = await this.userRepo.save(user);
+
+    const savedUser = await this.userRepo.save(user);
+
+    // ✅ Auto-create doctor profile if role is doctor
+    if (role === 'doctor') {
+      const doctor = this.doctorRepo.create({
+        user: savedUser,
+        name: savedUser.name, // required in doctor.entity.ts
+      });
+      await this.doctorRepo.save(doctor);
+    }
+
     return {
       message: 'Signup successful',
-      userId: saved.id,
+      userId: savedUser.id,
     };
   }
 
   async login(dto: LoginDto) {
     const user = await this.userRepo.findOne({
-      where: { email: dto.emailID },
+      where: { emailID: dto.emailID },
     });
-    console.log('Login payload:', dto);
+
     if (!user || !(await bcrypt.compare(dto.password, user.password))) {
       throw new UnauthorizedException('Wrong credentials');
     }
 
     const token = this.jwtService.sign({
       sub: user.id,
-      role: user.role, 
+      role: user.role,
     });
 
-    console.log('\n🔐 JWT Token for testing:\nBearer ' + token + '\n');
-
-    return { message: 'Login successful' };
+    return {
+      message: 'Login successful',
+      token,
+    };
   }
 
   async logout() {
