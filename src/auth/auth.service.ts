@@ -22,7 +22,7 @@ export class AuthService {
 
   async signup(dto: SignupDto, role: 'doctor' | 'patient') {
     const exists = await this.userRepo.findOne({
-      where: { emailID: dto.emailID },
+      where: { email: dto.emailID },
     });
 
     if (exists) {
@@ -46,7 +46,7 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const user = await this.userRepo.findOne({
-      where: { emailID: dto.emailID },
+      where: { email: dto.emailID },
     });
     console.log('Login payload:', dto);
     if (!user || !(await bcrypt.compare(dto.password, user.password))) {
