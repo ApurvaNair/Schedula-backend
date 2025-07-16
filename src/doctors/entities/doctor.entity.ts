@@ -13,7 +13,7 @@ export class Doctor {
   @Column()
   name: string;
 
-  @Column({ nullable: true })  // ✅ make optional
+  @Column({ nullable: true })  
 specialization: string;
 
 @Column({ type: 'int', nullable: true })
