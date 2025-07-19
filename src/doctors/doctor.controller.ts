@@ -1,18 +1,17 @@
 import {
   Controller,
   Get,
-  Req,
-  Query,
-  Param,
   Patch,
+  Param,
   Body,
+  Req,
   UseGuards,
   ForbiddenException,
+  Query,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { DoctorService } from './doctor.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
-import { Request } from 'express';
 
 @Controller('api/doctors')
 export class DoctorController {
@@ -20,32 +19,34 @@ export class DoctorController {
 
   @UseGuards(JwtAuthGuard)
   @Get('profile')
-  async getProfile(@Req() req: any) {
-    const user: any = req.user;
-    if (user.role !== 'doctor') throw new ForbiddenException('Access denied');
+  async getOwnProfile(@Req() req: any) {
+    if (req.user.role !== 'doctor') {
+      throw new ForbiddenException('Only doctors can access this resource');
+    }
 
-    return this.doctorService.getDoctorProfileByUserId(user.userId);
+    return this.doctorService.getDoctorProfileByUserId(req.user.id);
   }
 
   @UseGuards(JwtAuthGuard)
   @Patch('profile')
-  async updateDoctor(@Req() req: any, @Body() dto: UpdateDoctorDto) {
-    const user: any = req.user;
-    if (user.role !== 'doctor') throw new ForbiddenException('Access denied');
+  async updateProfile(@Req() req: any, @Body() dto: UpdateDoctorDto) {
+    if (req.user.role !== 'doctor') {
+      throw new ForbiddenException('Only doctors can update their profile');
+    }
 
-    return this.doctorService.updateDoctorProfile(user.userId, dto);
+    return this.doctorService.updateDoctorProfile(req.user.id, dto);
   }
 
-  @Get('/')
-  listDoctors(
+  @Get()
+  async listDoctors(
     @Query('first_name') first_name?: string,
     @Query('specialization') specialization?: string,
   ) {
     return this.doctorService.listDoctors(first_name, specialization);
   }
 
-  @Get('/:id')
-  getDoctor(@Param('id') id: string) {
+  @Get(':id')
+  async getDoctor(@Param('id') id: number) {
     return this.doctorService.getDoctorById(id);
   }
 }

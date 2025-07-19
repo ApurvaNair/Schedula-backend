@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 
 import { User } from '../users/entities/user.entity';
 import { Doctor } from '../doctors/entities/doctor.entity';
+import { Patient } from '../patients/entities/patient.entity';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -18,16 +19,19 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private userRepo: Repository<User>,
-    
+
     @InjectRepository(Doctor)
-    private doctorRepo: Repository<Doctor>, // 👈 added for auto-profile
+    private doctorRepo: Repository<Doctor>,
+
+    @InjectRepository(Patient)
+    private patientRepo: Repository<Patient>,
 
     private jwtService: JwtService,
   ) {}
 
   async signup(dto: SignupDto, role: 'doctor' | 'patient') {
     const exists = await this.userRepo.findOne({
-      where: { emailID: dto.emailID }, // emailID maps to 'email' column
+      where: { emailID: dto.emailID },
     });
     if (exists) throw new ConflictException('Email already exists');
 
@@ -42,13 +46,18 @@ export class AuthService {
 
     const savedUser = await this.userRepo.save(user);
 
-    // ✅ Auto-create doctor profile if role is doctor
     if (role === 'doctor') {
       const doctor = this.doctorRepo.create({
         user: savedUser,
-        name: savedUser.name, // required in doctor.entity.ts
+        name: savedUser.name,
       });
       await this.doctorRepo.save(doctor);
+    } else if (role === 'patient') {
+      const patient = this.patientRepo.create({
+        user: savedUser,
+        name:savedUser.name,
+});
+await this.patientRepo.save(patient);
     }
 
     return {
@@ -65,15 +74,17 @@ export class AuthService {
     if (!user || !(await bcrypt.compare(dto.password, user.password))) {
       throw new UnauthorizedException('Wrong credentials');
     }
-
+    
     const token = this.jwtService.sign({
       sub: user.id,
       role: user.role,
+      name: user.name,
+      emailID: user.emailID,
     });
 
     return {
       message: 'Login successful',
-      token,
+      token
     };
   }
 

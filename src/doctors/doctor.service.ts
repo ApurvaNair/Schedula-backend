@@ -11,54 +11,39 @@ export class DoctorService {
     private doctorRepo: Repository<Doctor>,
   ) {}
 
-  async getDoctorById(id: string) {
+  async getDoctorById(id: number) {
     const doctor = await this.doctorRepo.findOne({
       where: { id },
       relations: ['user'],
     });
-
     if (!doctor) throw new NotFoundException('Doctor not found');
-
-    const { user, ...rest } = doctor;
-    return rest;
+    return doctor;
   }
 
   async listDoctors(first_name?: string, specialization?: string) {
     const where: any = {};
-
     if (first_name) where.name = ILike(`%${first_name}%`);
     if (specialization) where.specialization = ILike(`%${specialization}%`);
 
-    const doctors = await this.doctorRepo.find({ where });
-
-    return doctors.map(({ user, ...rest }) => rest);
+    return this.doctorRepo.find({ where });
   }
 
-  async getDoctorProfileByUserId(userId: string) {
+  async getDoctorProfileByUserId(userId: number) {
     const doctor = await this.doctorRepo.findOne({
       where: { user: { id: userId } },
       relations: ['user'],
     });
 
-    if (!doctor) throw new NotFoundException('Doctor profile not found');
+    if (!doctor) {
+      throw new NotFoundException('Doctor profile not found');
+    }
 
-    const { user, ...rest } = doctor;
-    return rest;
+    return doctor;
   }
 
-  async updateDoctorProfile(userId: string, dto: UpdateDoctorDto) {
-    const doctor = await this.doctorRepo.findOne({
-      where: { user: { id: userId } },
-      relations: ['user'],
-    });
-
-    if (!doctor) throw new NotFoundException('Doctor profile not found');
-
+  async updateDoctorProfile(userId: number, dto: UpdateDoctorDto) {
+    const doctor = await this.getDoctorProfileByUserId(userId);
     Object.assign(doctor, dto);
-
-    const updated = await this.doctorRepo.save(doctor);
-
-    const { user, ...rest } = updated;
-    return rest;
+    return this.doctorRepo.save(doctor);
   }
 }
