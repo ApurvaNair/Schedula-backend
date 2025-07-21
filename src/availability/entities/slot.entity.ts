@@ -8,18 +8,22 @@ export class Slot {
   id: number;
 
   @Column()
-  date: string; 
+  date: string;
 
   @Column()
-  startTime: string; 
-  @Column()
-  endTime: string; 
+  startTime: string;
 
   @Column()
-  mode: string; 
+  endTime: string;
 
   @Column()
+  mode: string;
+
+  @Column({ type: 'int', nullable: true })
   maxBookings: number;
+
+  @Column({ default: 0 })     
+  currentBookings: number;
 
   @ManyToOne(() => Doctor, (doctor) => doctor.slots, { onDelete: 'CASCADE' })
   doctor: Doctor;

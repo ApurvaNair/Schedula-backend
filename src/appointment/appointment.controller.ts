@@ -1,4 +1,13 @@
-import { Controller, Post, Patch, Delete, Get, Param, Body } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Delete,
+  NotFoundException,
+} from '@nestjs/common';
 import { AppointmentService } from './appointment.service';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { BookAppointmentDto } from './dto/book-appointment.dto';
@@ -7,35 +16,38 @@ import { RescheduleSelectedDto } from './dto/reschedule-selected.dto';
 
 @Controller('api/appointments')
 export class AppointmentController {
-  constructor(private readonly service: AppointmentService) {}
+  constructor(private readonly appointmentsService: AppointmentService) {}
+
+  @Post('slots')
+  async createSlot(@Body() dto: CreateSlotDto) {
+    return this.appointmentsService.createSlot(dto);
+  }
 
   @Post()
-  bookAppointment(@Body() dto: BookAppointmentDto) {
-    return this.service.bookAppointment(dto);
+  async bookAppointment(@Body() dto: BookAppointmentDto) {
+    return this.appointmentsService.bookAppointment(dto);
   }
 
-  @Delete(':id')
-  cancel(@Param('id') id: number) {
-    return this.service.cancelAppointment(id);
-  }
-
-  @Get('patient/:id')
-  getPatientAppointments(@Param('id') id: number) {
-    return this.service.viewAppointmentsByPatient(id);
-  }
-
-  @Get('doctor/:id')
-  getDoctorAppointments(@Param('id') id: number) {
-    return this.service.viewAppointmentsByDoctor(id);
+  @Patch(':id/reschedule')
+  async patientReschedule(
+    @Param('id') appointmentId: string,
+    @Body('newSlotId') newSlotId: number,
+  ) {
+    return this.appointmentsService.patientReschedule(+appointmentId, newSlotId);
   }
 
   @Patch('reschedule-all')
-  rescheduleAll(@Body() dto: RescheduleAllDto) {
-    return this.service.rescheduleAll(dto);
+  async rescheduleAll(@Body() dto: RescheduleAllDto) {
+    return this.appointmentsService.rescheduleAll(dto);
   }
 
   @Patch('reschedule-selected')
-  rescheduleSelected(@Body() dto: RescheduleSelectedDto) {
-    return this.service.rescheduleSelected(dto);
+  async rescheduleSelected(@Body() dto: RescheduleSelectedDto) {
+    return this.appointmentsService.rescheduleSelected(dto);
+  }
+
+  @Delete(':id')
+  async cancelAppointment(@Param('id') id: string) {
+    return this.appointmentsService.cancelAppointment(+id);
   }
 }
