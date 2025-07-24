@@ -1,51 +1,53 @@
 import {
   Body,
   Controller,
-  Post,
-  Patch,
-  Delete,
-  Param,
-  ParseIntPipe,
   Get,
-  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Delete,
+  NotFoundException,
 } from '@nestjs/common';
 import { AppointmentService } from './appointment.service';
+import { CreateSlotDto } from './dto/create-slot.dto';
 import { BookAppointmentDto } from './dto/book-appointment.dto';
+import { RescheduleAllDto } from './dto/reschedule-all.dto';
+import { RescheduleSelectedDto } from './dto/reschedule-selected.dto';
 
 @Controller('api/appointments')
 export class AppointmentController {
-  constructor(private readonly appointmentService: AppointmentService) {}
+  constructor(private readonly appointmentsService: AppointmentService) {}
+
+  @Post('slots')
+  async createSlot(@Body() dto: CreateSlotDto) {
+    return this.appointmentsService.createSlot(dto);
+  }
 
   @Post()
   async bookAppointment(@Body() dto: BookAppointmentDto) {
-    return this.appointmentService.bookAppointment(dto);
-  }
-
-  @Get('doctor/:doctorId/date/:date')
-  getDoctorAppointmentsByDate(
-    @Param('doctorId', ParseIntPipe) doctorId: number,
-    @Param('date') date: string,
-  ) {
-    return this.appointmentService.getDoctorAppointmentsByDate(doctorId, date);
+    return this.appointmentsService.bookAppointment(dto);
   }
 
   @Patch(':id/reschedule')
   async patientReschedule(
-    @Param('id', ParseIntPipe) appointmentId: number,
-    @Body()
-    body: { newSlotId: number; newStartTime: string; newEndTime: string },
+    @Param('id') appointmentId: string,
+    @Body('newSlotId') newSlotId: number,
   ) {
-    return this.appointmentService.patientReschedule(
-      appointmentId,
-      body.newSlotId,
-      body.newStartTime,
-      body.newEndTime,
-    );
+    return this.appointmentsService.patientReschedule(+appointmentId, newSlotId);
+  }
+
+  @Patch('reschedule-all')
+  async rescheduleAll(@Body() dto: RescheduleAllDto) {
+    return this.appointmentsService.rescheduleAll(dto);
+  }
+
+  @Patch('reschedule-selected')
+  async rescheduleSelected(@Body() dto: RescheduleSelectedDto) {
+    return this.appointmentsService.rescheduleSelected(dto);
   }
 
   @Delete(':id')
-  @HttpCode(204)
-  async cancelAppointment(@Param('id', ParseIntPipe) id: number) {
-    return this.appointmentService.cancelAppointment(id);
+  async cancelAppointment(@Param('id') id: string) {
+    return this.appointmentsService.cancelAppointment(+id);
   }
 }

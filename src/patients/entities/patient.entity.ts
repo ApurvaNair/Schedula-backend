@@ -1,13 +1,5 @@
-import { Appointment } from 'src/appointment/entities/appointment.entity';
 import { User } from 'src/users/entities/user.entity';
-import {
-  Column,
-  Entity,
-  PrimaryGeneratedColumn,
-  OneToOne,
-  JoinColumn,
-  OneToMany,
-} from 'typeorm';
+import { Column, Entity, PrimaryGeneratedColumn, OneToOne, JoinColumn } from 'typeorm';
 
 @Entity()
 export class Patient {
@@ -15,12 +7,12 @@ export class Patient {
   id: number;
 
   @OneToOne(() => User, { eager: true, cascade: true })
-  @JoinColumn({ name: 'user_id' })
+  @JoinColumn({ name: 'user_id' }) 
   user: User;
 
   @Column()
   name: string;
-
+  
   @Column({ nullable: true })
   age: number;
 
@@ -35,7 +27,4 @@ export class Patient {
 
   @Column({ nullable: true })
   medicalHistory: string;
-
-  @OneToMany(() => Appointment, (appointment) => appointment.patient)
-  appointments: Appointment[];
 }
