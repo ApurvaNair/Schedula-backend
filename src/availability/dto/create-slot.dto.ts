@@ -21,10 +21,10 @@ export class CreateSlotDto {
   @IsIn(['stream', 'wave'], { message: 'Mode must be either stream or wave' })
   mode: string;
 
-   @IsInt()
+  @IsInt()
   @Min(1)
   slotDuration: number;
-  
+
   @ValidateIf((o) => o.mode === 'wave')
   @IsInt({ message: 'maxBookings must be an integer' })
   @Min(1, { message: 'maxBookings must be at least 1 for wave mode' })

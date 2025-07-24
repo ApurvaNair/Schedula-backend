@@ -38,10 +38,7 @@ export class AvailabilityController {
     const doctor = await this.availabilityService.getDoctorById(doctorId);
 
     if (doctor.user.id !== req.user.id) {
-      throw new HttpException(
-        'Only the doctor can add availability to their profile',
-        HttpStatus.FORBIDDEN,
-      );
+      throw new HttpException('Only the doctor can add availability', HttpStatus.FORBIDDEN);
     }
 
     return this.availabilityService.createSlot(doctorId, body);
@@ -57,38 +54,40 @@ export class AvailabilityController {
     const doctor = await this.availabilityService.getDoctorById(doctorId);
 
     if (doctor.user.id !== req.user.id) {
-      throw new HttpException(
-        'Only the doctor can delete this slot',
-        HttpStatus.FORBIDDEN,
-      );
+      throw new HttpException('Only the doctor can delete this slot', HttpStatus.FORBIDDEN);
     }
 
     return this.availabilityService.deleteSlot(slotId, doctorId);
   }
 
-  @Patch(':id/slots/:slotId')
+  @Get(':id/sub-slots/:date')
 @Roles('doctor')
-async rescheduleSlot(
+async getAvailableSubSlots(
   @Param('id', ParseIntPipe) doctorId: number,
-  @Param('slotId', ParseIntPipe) slotId: number,
-  @Request() req,
-  @Body() updateData: {
-    date?: string;
-    startTime?: string;
-    endTime?: string;
-    mode?: string;
-  },
+  @Param('date') date: string
 ) {
-  const doctor = await this.availabilityService.getDoctorById(doctorId);
-
-  if (doctor.user.id !== req.user.id) {
-    throw new HttpException(
-      'Only the doctor can update this slot',
-      HttpStatus.FORBIDDEN,
-    );
-  }
-
-  return this.availabilityService.rescheduleSlot(doctorId, slotId, updateData);
+  return this.availabilityService.getAvailableSubSlots(doctorId, date);
 }
 
+  @Patch(':id/slots/:slotId')
+  @Roles('doctor')
+  async rescheduleSlot(
+    @Param('id', ParseIntPipe) doctorId: number,
+    @Param('slotId', ParseIntPipe) slotId: number,
+    @Request() req,
+    @Body() updateData: {
+      date?: string;
+      startTime?: string;
+      endTime?: string;
+      mode?: string;
+    },
+  ) {
+    const doctor = await this.availabilityService.getDoctorById(doctorId);
+
+    if (doctor.user.id !== req.user.id) {
+      throw new HttpException('Only the doctor can update this slot', HttpStatus.FORBIDDEN);
+    }
+
+    return this.availabilityService.rescheduleSlot(doctorId, slotId, updateData);
+  }
 }

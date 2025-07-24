@@ -1,21 +1,22 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import { Slot } from './entities/slot.entity';
 import { Doctor } from '../doctors/entities/doctor.entity';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { Appointment } from 'src/appointment/entities/appointment.entity';
+import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
+
+dayjs.extend(isSameOrBefore);
 
 @Injectable()
 export class AvailabilityService {
   constructor(
     @InjectRepository(Slot)
     private slotRepo: Repository<Slot>,
-
     @InjectRepository(Doctor)
     private doctorRepo: Repository<Doctor>,
-
     @InjectRepository(Appointment)
     private appointmentRepo: Repository<Appointment>,
   ) {}
@@ -25,196 +26,152 @@ export class AvailabilityService {
       where: { id: doctorId },
       relations: ['user'],
     });
-
-    if (!doctor) {
-      throw new HttpException('Doctor not found', HttpStatus.NOT_FOUND);
-    }
-
+    if (!doctor) throw new HttpException('Doctor not found', HttpStatus.NOT_FOUND);
     return doctor;
   }
 
-  async getDoctorSlots(doctorId: number) {
+  async getDoctorSlots(doctorId: number): Promise<Slot[]> {
     return this.slotRepo.find({
       where: { doctor: { id: doctorId } },
       order: { date: 'ASC', startTime: 'ASC' },
     });
   }
 
-  async createSlot(doctorId: number, dto: CreateSlotDto) {
+  async createSlot(doctorId: number, dto: CreateSlotDto): Promise<Slot> {
     const { date, startTime, endTime, mode, maxBookings, slotDuration } = dto;
-
     const now = dayjs();
-    const slotStart = dayjs(`${date}T${startTime}`);
-    const slotEnd = dayjs(`${date}T${endTime}`);
+    const start = dayjs(`${date}T${startTime}`);
+    const end = dayjs(`${date}T${endTime}`);
 
-    if (!slotStart.isValid() || !slotEnd.isValid() || !slotEnd.isAfter(slotStart)) {
-      throw new HttpException('Invalid slot time range', HttpStatus.BAD_REQUEST);
+    if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
+      throw new HttpException('Invalid session time range', HttpStatus.BAD_REQUEST);
+    }
+    if (start.isBefore(now)) {
+      throw new HttpException('Cannot create session in the past', HttpStatus.BAD_REQUEST);
     }
 
-    if (slotStart.isBefore(now)) {
-      throw new HttpException('Cannot create a slot in the past', HttpStatus.BAD_REQUEST);
-    }
-
-    // Disallow overlapping slots
-    const existingSlots = await this.slotRepo.find({
-      where: { doctor: { id: doctorId }, date },
-    });
-
-    const overlapping = existingSlots.find((s) => {
-      const sStart = dayjs(`${s.date}T${s.startTime}`);
-      const sEnd = dayjs(`${s.date}T${s.endTime}`);
-      return slotStart.isBefore(sEnd) && slotEnd.isAfter(sStart);
-    });
-
-    if (overlapping) {
-      throw new HttpException(
-        `Slot overlaps with an existing slot from ${overlapping.startTime} to ${overlapping.endTime}`,
-        HttpStatus.CONFLICT,
-      );
-    }
-
-    const createdSlots: Slot[] = [];
-
-    if (mode === 'stream') {
-      if (!slotDuration || slotDuration <= 0) {
-        throw new HttpException('slotDuration is required for stream mode', HttpStatus.BAD_REQUEST);
-      }
-
-      let currentStart = slotStart;
-
-      while (currentStart.isBefore(slotEnd)) {
-        const currentEnd = currentStart.add(slotDuration, 'minute');
-
-        if (currentEnd.isAfter(slotEnd)) break;
-
-        const streamSlot = this.slotRepo.create({
-          doctor: { id: doctorId },
-          date,
-          startTime: currentStart.format('HH:mm'),
-          endTime: currentEnd.format('HH:mm'),
-          mode,
-          maxBookings: 1,
-        });
-
-        const saved = await this.slotRepo.save(streamSlot);
-        createdSlots.push(saved);
-
-        currentStart = currentEnd;
-      }
-
-    } else if (mode === 'wave') {
-      const waveSlot = this.slotRepo.create({
+    const existing = await this.slotRepo.findOne({
+      where: {
         doctor: { id: doctorId },
         date,
         startTime,
         endTime,
-        mode,
-        maxBookings,
-      });
+      },
+    });
+    if (existing) throw new HttpException('Duplicate session not allowed', HttpStatus.CONFLICT);
 
-      const saved = await this.slotRepo.save(waveSlot);
-      createdSlots.push(saved);
-
-    } else {
-      throw new HttpException('Invalid mode. Choose either "stream" or "wave"', HttpStatus.BAD_REQUEST);
-    }
-
-    return createdSlots;
+    const session = this.slotRepo.create({
+      doctor: { id: doctorId },
+      date,
+      startTime,
+      endTime,
+      mode,
+      maxBookings,
+      slotDuration,
+    });
+    return this.slotRepo.save(session);
   }
 
-  async deleteSlot(slotId: number, doctorId: number) {
+  async deleteSlot(slotId: number, doctorId: number): Promise<void> {
     const slot = await this.slotRepo.findOne({
       where: { id: slotId, doctor: { id: doctorId } },
     });
-
-    if (!slot) {
-      throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
-    }
-
-    const isBooked = await this.appointmentRepo.findOne({
+    if (!slot) throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
+    const hasAppt = await this.appointmentRepo.findOne({
       where: { slot: { id: slot.id } },
     });
-
-    if (isBooked) {
-      throw new HttpException(
-        'Cannot delete a slot that has already been booked',
-        HttpStatus.BAD_REQUEST,
-      );
+    if (hasAppt) {
+      throw new HttpException('Cannot delete session with bookings', HttpStatus.BAD_REQUEST);
     }
-
-    return this.slotRepo.remove(slot);
+    await this.slotRepo.remove(slot);
   }
 
   async rescheduleSlot(
     doctorId: number,
     slotId: number,
-    updateData: {
-      date?: string;
-      startTime?: string;
-      endTime?: string;
-      mode?: string;
-    },
-  ) {
+    data: { date?: string; startTime?: string; endTime?: string },
+  ): Promise<Slot> {
     const slot = await this.slotRepo.findOne({
       where: { id: slotId, doctor: { id: doctorId } },
     });
+    if (!slot) throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
 
-    if (!slot) {
-      throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
-    }
-
-    const existingAppointments = await this.appointmentRepo.count({
+    const apptCount = await this.appointmentRepo.count({
       where: { slot: { id: slot.id } },
     });
+    if (apptCount > 0) throw new HttpException('Cannot reschedule session with bookings', HttpStatus.BAD_REQUEST);
 
-    if (existingAppointments > 0) {
-      throw new HttpException(
-        'Cannot reschedule a slot with existing bookings',
-        HttpStatus.BAD_REQUEST,
-      );
+    slot.date = data.date || slot.date;
+    slot.startTime = data.startTime || slot.startTime;
+    slot.endTime = data.endTime || slot.endTime;
+
+    const start = dayjs(`${slot.date}T${slot.startTime}`);
+    const end = dayjs(`${slot.date}T${slot.endTime}`);
+    const now = dayjs();
+
+    if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
+      throw new HttpException('Invalid session range', HttpStatus.BAD_REQUEST);
+    }
+    if (start.isBefore(now)) {
+      throw new HttpException('Cannot reschedule into the past', HttpStatus.BAD_REQUEST);
     }
 
-    const newDate = updateData.date || slot.date;
-    const newStartTime = updateData.startTime || slot.startTime;
-    const newEndTime = updateData.endTime || slot.endTime;
-
-    const slotStart = dayjs(`${newDate}T${newStartTime}`);
-    const slotEnd = dayjs(`${newDate}T${newEndTime}`);
-
-    if (!slotStart.isValid() || !slotEnd.isValid() || !slotEnd.isAfter(slotStart)) {
-      throw new HttpException('Invalid time range', HttpStatus.BAD_REQUEST);
-    }
-
-    if (slotStart.isBefore(dayjs())) {
-      throw new HttpException('Cannot reschedule to a past time', HttpStatus.BAD_REQUEST);
-    }
-
-    const existingSlots = await this.slotRepo.find({
+    const conflict = await this.slotRepo.findOne({
       where: {
         doctor: { id: doctorId },
-        date: newDate,
+        date: slot.date,
         id: Not(slot.id),
       },
     });
-
-    const overlapping = existingSlots.find((s) => {
-      const sStart = dayjs(`${s.date}T${s.startTime}`);
-      const sEnd = dayjs(`${s.date}T${s.endTime}`);
-      return slotStart.isBefore(sEnd) && slotEnd.isAfter(sStart);
-    });
-
-    if (overlapping) {
-      throw new HttpException(
-        `New slot overlaps with existing slot from ${overlapping.startTime} to ${overlapping.endTime}`,
-        HttpStatus.CONFLICT,
-      );
+    if (conflict) {
+      const cStart = conflict.startTime;
+      const cEnd = conflict.endTime;
+      throw new HttpException(`Conflicts with ${cStart}-${cEnd}`, HttpStatus.CONFLICT);
     }
 
-    slot.date = newDate;
-    slot.startTime = newStartTime;
-    slot.endTime = newEndTime;
-    slot.mode = updateData.mode || slot.mode;
+    return this.slotRepo.save(slot);
+  }
 
-    return await this.slotRepo.save(slot);
+  async getAvailableSubSlots(doctorId: number, date: string) {
+    const sessions = await this.slotRepo.find({
+      where: { doctor: { id: doctorId }, date },
+    });
+    const appointments = await this.appointmentRepo.find({
+      relations: ['slot'],
+      where: {
+        slot: {
+          doctor: { id: doctorId },
+          date,
+        },
+      },
+    });
+
+    const result: { sessionId: number; startTime: string; endTime: string }[] = [];
+
+    for (const s of sessions) {
+      let t = dayjs(`${s.date}T${s.startTime}`);
+      const end = dayjs(`${s.date}T${s.endTime}`);
+
+      while (t.add(s.slotDuration, 'minute').isSameOrBefore(end)) {
+        const st = t.format('HH:mm');
+        const en = t.add(s.slotDuration, 'minute').format('HH:mm');
+
+        const isBooked = appointments.some(
+          (a) => a.startTime === st && a.endTime === en && a.slot.id === s.id,
+        );
+
+        if (!isBooked) {
+          result.push({
+            sessionId: s.id,
+            startTime: st,
+            endTime: en,
+          });
+        }
+
+        t = t.add(s.slotDuration, 'minute');
+      }
+    }
+
+    return result;
   }
 }

@@ -1,158 +1,156 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Appointment } from './entities/appointment.entity';
 import { Slot } from 'src/availability/entities/slot.entity';
+import { BookAppointmentDto } from './dto/book-appointment.dto';
 import { Doctor } from 'src/doctors/entities/doctor.entity';
 import { Patient } from 'src/patients/entities/patient.entity';
-import { CreateSlotDto } from './dto/create-slot.dto';
-import { BookAppointmentDto } from './dto/book-appointment.dto';
-import { RescheduleAllDto } from './dto/reschedule-all.dto';
-import { RescheduleSelectedDto } from './dto/reschedule-selected.dto';
+import dayjs from 'dayjs';
 
 @Injectable()
 export class AppointmentService {
   constructor(
     @InjectRepository(Appointment)
-    private readonly appointmentRepo: Repository<Appointment>,
-
+    private appointmentRepo: Repository<Appointment>,
     @InjectRepository(Slot)
-    private readonly slotRepo: Repository<Slot>,
-
+    private slotRepo: Repository<Slot>,
     @InjectRepository(Doctor)
-    private readonly doctorRepo: Repository<Doctor>,
-
+    private doctorRepo: Repository<Doctor>,
     @InjectRepository(Patient)
-    private readonly patientRepo: Repository<Patient>,
+    private patientRepo: Repository<Patient>,
   ) {}
 
-  async createSlot(dto: CreateSlotDto) {
-    const doctor = await this.doctorRepo.findOne({ where: { id: dto.doctorId } });
-    if (!doctor) throw new NotFoundException('Doctor not found');
+  private reasonPriorityMap = {
+    'Chest Pain': 1,
+    'Accident': 1,
+    'Fever': 2,
+    'Headache': 3,
+    'Follow-up': 4,
+    'General Consultation': 5,
+    'Other': 5,
+  };
 
-    // Check for overlapping slots
-    const overlapping = await this.slotRepo.findOne({
+  async bookAppointment(dto: BookAppointmentDto): Promise<Appointment> {
+    const { slotId, patientId, reasonCategory, reasonDescription, startTime, endTime } = dto;
+
+    const slot = await this.slotRepo.findOne({
+      where: { id: slotId },
+      relations: ['doctor'],
+    });
+    if (!slot) throw new HttpException('Slot session not found', HttpStatus.NOT_FOUND);
+
+    const patient = await this.patientRepo.findOne({ where: { id: patientId } });
+    if (!patient) throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
+
+    const start = dayjs(`${slot.date}T${startTime}`);
+    const end = dayjs(`${slot.date}T${endTime}`);
+    const slotStart = dayjs(`${slot.date}T${slot.startTime}`);
+    const slotEnd = dayjs(`${slot.date}T${slot.endTime}`);
+
+    if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
+      throw new HttpException('Invalid time range', HttpStatus.BAD_REQUEST);
+    }
+
+    if (start.isBefore(slotStart) || end.isAfter(slotEnd)) {
+      throw new HttpException('Booking outside availability window', HttpStatus.BAD_REQUEST);
+    }
+
+    const existing = await this.appointmentRepo.findOne({
       where: {
-        doctor: { id: dto.doctorId },
-        date: dto.date,
-        startTime: Between(dto.startTime, dto.endTime),
-        endTime: Between(dto.startTime, dto.endTime),
+        slot: { id: slot.id },
+        startTime,
+        endTime,
       },
     });
-    if (overlapping) throw new ConflictException('Overlapping slot exists');
-
-    const slot = this.slotRepo.create({ ...dto, doctor });
-    return this.slotRepo.save(slot);
-  }
-
-  async bookAppointment(dto: BookAppointmentDto) {
-    const slot = await this.slotRepo.findOne({
-      where: { id: dto.slotId },
-      relations: ['appointments'],
-    });
-    if (!slot) throw new NotFoundException('Slot not found');
-
-    const patient = await this.patientRepo.findOne({ where: { id: dto.patientId } });
-    if (!patient) throw new NotFoundException('Patient not found');
-
-    const currentCount = await this.appointmentRepo.count({
-      where: { slot: { id: slot.id } },
-    });
-
-    if (slot.mode === 'stream' && currentCount > 0) {
-      throw new ConflictException('Stream slot already booked');
+    if (existing) {
+      throw new HttpException('Sub-slot already booked', HttpStatus.CONFLICT);
     }
 
-    if (slot.mode === 'wave' && currentCount >= slot.maxBookings) {
-      throw new ConflictException('Wave slot is full');
-    }
+    const priority = this.reasonPriorityMap[reasonCategory] ?? 5;
 
     const appointment = this.appointmentRepo.create({
+      patient,
       slot,
-      patientId: patient.id,
-      reason: dto.reason,
+      startTime,
+      endTime,
+      reasonCategory,
+      reasonDescription: reasonDescription || '',
+      priority,
+      isUrgencyFinalized: false,
     });
 
     return this.appointmentRepo.save(appointment);
   }
 
-  async patientReschedule(appointmentId: number, newSlotId: number) {
+  async getDoctorAppointmentsByDate(doctorId: number, date: string) {
+    return this.appointmentRepo.find({
+      where: {
+        slot: {
+          doctor: { id: doctorId },
+          date,
+        },
+      },
+      relations: ['slot', 'patient'],
+      order: { startTime: 'ASC' },
+    });
+  }
+
+  async patientReschedule(
+    appointmentId: number,
+    newSlotId: number,
+    newStartTime: string,
+    newEndTime: string,
+  ) {
     const appointment = await this.appointmentRepo.findOne({
       where: { id: appointmentId },
       relations: ['slot'],
     });
-    if (!appointment) throw new NotFoundException('Appointment not found');
-
-    const newSlot = await this.slotRepo.findOne({
-      where: { id: newSlotId },
-      relations: ['appointments'],
-    });
-    if (!newSlot) throw new NotFoundException('New slot not found');
-
-    const count = await this.appointmentRepo.count({
-      where: { slot: { id: newSlotId } },
-    });
-
-    if (newSlot.mode === 'stream' && count > 0) {
-      throw new ConflictException('New stream slot already booked');
+    const newSlot = await this.slotRepo.findOne({ where: { id: newSlotId } });
+    if (!appointment || !newSlot) {
+      throw new HttpException('Invalid appointment or slot', HttpStatus.NOT_FOUND);
     }
 
-    if (newSlot.mode === 'wave' && count >= newSlot.maxBookings) {
-      throw new ConflictException('New wave slot is full');
+    const newStart = dayjs(`${newSlot.date}T${newStartTime}`);
+    const newEnd = dayjs(`${newSlot.date}T${newEndTime}`);
+    const slotStart = dayjs(`${newSlot.date}T${newSlot.startTime}`);
+    const slotEnd = dayjs(`${newSlot.date}T${newSlot.endTime}`);
+
+    if (newStart.isBefore(slotStart) || newEnd.isAfter(slotEnd)) {
+      throw new HttpException('New time out of slot window', HttpStatus.BAD_REQUEST);
+    }
+
+    const conflict = await this.appointmentRepo.findOne({
+      where: {
+        slot: { id: newSlot.id },
+        startTime: newStartTime,
+        endTime: newEndTime,
+      },
+    });
+    if (conflict) {
+      throw new HttpException('New time already booked', HttpStatus.CONFLICT);
     }
 
     appointment.slot = newSlot;
+    appointment.startTime = newStartTime;
+    appointment.endTime = newEndTime;
     return this.appointmentRepo.save(appointment);
   }
 
-  async rescheduleAll(dto: RescheduleAllDto) {
-    const slots = await this.slotRepo.find({
-      where: { doctor: { id: dto.doctorId } },
-    });
+  async cancelAppointment(id: number) {
+    const appt = await this.appointmentRepo.findOne({ where: { id } });
+    if (!appt) throw new HttpException('Appointment not found', HttpStatus.NOT_FOUND);
+    return this.appointmentRepo.remove(appt);
+  }
 
-    for (const slot of slots) {
-      slot.startTime = this.shiftTime(slot.startTime, dto.shiftMinutes);
-      slot.endTime = this.shiftTime(slot.endTime, dto.shiftMinutes);
-      await this.slotRepo.save(slot);
+  async finalizeUrgency(appointmentId: number, finalPriority: number): Promise<Appointment> {
+    const appointment = await this.appointmentRepo.findOne({ where: { id: appointmentId } });
+    if (!appointment) {
+      throw new HttpException('Appointment not found', HttpStatus.NOT_FOUND);
     }
 
-    return { message: 'All slots rescheduled' };
-  }
-
- async rescheduleSelected(dto: RescheduleSelectedDto) {
-  const appointments = await Promise.all(
-    dto.appointmentIds.map((id) =>
-      this.appointmentRepo.findOne({
-        where: { id },
-        relations: ['slot'],
-      })
-    )
-  );
-     for (const appt of appointments) {
-    if (!appt || !appt.slot) continue;
-    appt.slot.startTime = this.shiftTime(appt.slot.startTime, dto.shiftMinutes);
-    appt.slot.endTime = this.shiftTime(appt.slot.endTime, dto.shiftMinutes);
-    await this.slotRepo.save(appt.slot);
-  }
-
-  return { message: 'Selected appointments rescheduled' };
-}
-
-  async cancelAppointment(id: number) {
-    const appointment = await this.appointmentRepo.findOne({ where: { id } });
-    if (!appointment) throw new NotFoundException('Appointment not found');
-    await this.appointmentRepo.remove(appointment);
-    return { message: 'Appointment cancelled' };
-  }
-
-  private shiftTime(time: string, minutes: number): string {
-    const [hour, min] = time.split(':').map(Number);
-    const date = new Date();
-    date.setHours(hour, min + minutes);
-    return date.toTimeString().slice(0, 5); // returns 'HH:MM'
+    appointment.priority = finalPriority;
+    appointment.isUrgencyFinalized = true;
+    return this.appointmentRepo.save(appointment);
   }
 }

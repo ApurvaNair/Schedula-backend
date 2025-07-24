@@ -1,8 +1,8 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, OneToMany } from 'typeorm';
 import { Doctor } from 'src/doctors/entities/doctor.entity';
 import { Appointment } from 'src/appointment/entities/appointment.entity';
 
-@Entity({ name: 'slot' })
+@Entity()
 export class Slot {
   @PrimaryGeneratedColumn()
   id: number;
@@ -16,16 +16,19 @@ export class Slot {
   @Column()
   endTime: string;
 
-  @Column()
+  @Column({ default: 'stream' }) // stream or wave
   mode: string;
 
-  @Column({ type: 'int', nullable: true })
+  @Column({ nullable: true })
   maxBookings: number;
 
-  @Column({ default: 0 })     
-  currentBookings: number;
+  @Column({ default: 15 }) 
+  slotDuration: number;
 
-  @ManyToOne(() => Doctor, (doctor) => doctor.slots, { onDelete: 'CASCADE' })
+  @Column({ nullable: true })
+  bufferDuration: number;
+
+  @ManyToOne(() => Doctor, (doctor) => doctor.slots, { eager: true })
   doctor: Doctor;
 
   @OneToMany(() => Appointment, (appointment) => appointment.slot)
