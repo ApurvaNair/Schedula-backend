@@ -7,6 +7,7 @@ import {
   OneToOne,
   JoinColumn,
   OneToMany,
+  ManyToOne,
 } from 'typeorm';
 
 @Entity()
@@ -38,4 +39,8 @@ export class Patient {
 
   @OneToMany(() => Appointment, (appointment) => appointment.patient)
   appointments: Appointment[];
+
+  @ManyToOne(() => Patient, (patient) => patient.appointments, { eager: true })
+patient: Patient;
+
 }

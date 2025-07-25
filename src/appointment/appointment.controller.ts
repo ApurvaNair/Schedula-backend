@@ -7,10 +7,12 @@ import {
   Param,
   ParseIntPipe,
   Get,
-  HttpCode,
+  UseGuards
 } from '@nestjs/common';
 import { AppointmentService } from './appointment.service';
 import { BookAppointmentDto } from './dto/book-appointment.dto';
+import { ConfirmBufferDto } from './dto/confirm-buffer.dto';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 
 @Controller('api/appointments')
 export class AppointmentController {
@@ -20,6 +22,12 @@ export class AppointmentController {
   async bookAppointment(@Body() dto: BookAppointmentDto) {
     return this.appointmentService.bookAppointment(dto);
   }
+
+  @Post('buffer-confirm')
+  @UseGuards(JwtAuthGuard)
+  async confirmBufferSlot(@Body() dto: ConfirmBufferDto) {
+  return this.appointmentService.confirmBufferSlot(dto);
+}
 
   @Get('doctor/:doctorId/date/:date')
   getDoctorAppointmentsByDate(
@@ -44,8 +52,15 @@ export class AppointmentController {
   }
 
   @Delete(':id')
-  @HttpCode(204)
   async cancelAppointment(@Param('id', ParseIntPipe) id: number) {
     return this.appointmentService.cancelAppointment(id);
+  }
+
+   @Patch(':id/finalize-urgency')
+  async finalizeUrgency(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { finalPriority: number },
+  ) {
+    return this.appointmentService.finalizeUrgency(id, body.finalPriority);
   }
 }

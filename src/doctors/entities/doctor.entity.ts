@@ -1,4 +1,3 @@
-// src/doctors/entities/doctor.entity.ts
 import {
   Entity,
   PrimaryGeneratedColumn,

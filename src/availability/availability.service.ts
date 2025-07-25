@@ -157,7 +157,11 @@ export class AvailabilityService {
         const en = t.add(s.slotDuration, 'minute').format('HH:mm');
 
         const isBooked = appointments.some(
-          (a) => a.startTime === st && a.endTime === en && a.slot.id === s.id,
+          (a) =>{
+            const apptStart = dayjs(`${a.date}T${a.startTime}`).format('HH:mm');
+            const apptEnd = dayjs(`${a.date}T${a.endTime}`).format('HH:mm');
+            return apptStart === st && apptEnd === en && a.slot.id === s.id;
+          }
         );
 
         if (!isBooked) {
