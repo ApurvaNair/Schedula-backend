@@ -7,11 +7,14 @@ import { Doctor } from '../doctors/entities/doctor.entity';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { Appointment } from 'src/appointment/entities/appointment.entity';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
+import { AppointmentService } from 'src/appointment/appointment.service';
 
 dayjs.extend(isSameOrBefore);
 
 @Injectable()
 export class AvailabilityService {
+  slotRepository: any;
+  shrinkSlot: any;
   constructor(
     @InjectRepository(Slot)
     private slotRepo: Repository<Slot>,
@@ -72,19 +75,27 @@ export class AvailabilityService {
     return this.slotRepo.save(session);
   }
 
-  async deleteSlot(slotId: number, doctorId: number): Promise<void> {
-    const slot = await this.slotRepo.findOne({
-      where: { id: slotId, doctor: { id: doctorId } },
-    });
-    if (!slot) throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
-    const hasAppt = await this.appointmentRepo.findOne({
-      where: { slot: { id: slot.id } },
-    });
-    if (hasAppt) {
-      throw new HttpException('Cannot delete session with bookings', HttpStatus.BAD_REQUEST);
-    }
-    await this.slotRepo.remove(slot);
+  async deleteSlot(slotId: number, doctorId: number) {
+  const slot = await this.slotRepository.findOne({
+    where: { id: slotId },
+    relations: ['doctor', 'appointments', 'appointments.patient'],
+  });
+
+  if (!slot) {
+    throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
   }
+
+  if (slot.doctor.id !== doctorId) {
+    throw new HttpException('Unauthorized access', HttpStatus.FORBIDDEN);
+  }
+
+  if (!slot.appointments || slot.appointments.length === 0) {
+    await this.slotRepository.remove(slot);
+    return { message: 'Slot deleted successfully (no appointments)' };
+  }
+
+  return this.shrinkSlot(doctorId, slotId);  
+}
 
   async rescheduleSlot(
     doctorId: number,

@@ -38,88 +38,55 @@ export class AppointmentService {
   };
 
   async bookAppointment(dto: BookAppointmentDto): Promise<Appointment> {
-    const { slotId, patientId, reasonCategory, reasonDescription, startTime, endTime } = dto;
+  const { slotId, patientId, reasonCategory, reasonDescription, startTime, endTime } = dto;
 
-    const slot = await this.slotRepo.findOne({
-      where: { id: slotId },
-      relations: ['doctor'],
-    });
-    if (!slot) throw new HttpException('Slot session not found', HttpStatus.NOT_FOUND);
+  const slot = await this.slotRepo.findOne({
+    where: { id: slotId },
+    relations: ['doctor'],
+  });
+  if (!slot) throw new HttpException('Slot session not found', HttpStatus.NOT_FOUND);
 
-    const patient = await this.patientRepo.findOne({ where: { id: patientId } });
-    if (!patient) throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
+  const patient = await this.patientRepo.findOne({ where: { id: patientId } });
+  if (!patient) throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
 
-    const start = dayjs(`${slot.date}T${startTime}`);
-    const end = dayjs(`${slot.date}T${endTime}`);
-    const slotStart = dayjs(`${slot.date}T${slot.startTime}`);
-    const slotEnd = dayjs(`${slot.date}T${slot.endTime}`);
+  const start = dayjs(`${slot.date}T${startTime}`);
+  const end = dayjs(`${slot.date}T${endTime}`);
+  if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
+    throw new HttpException('Invalid time range', HttpStatus.BAD_REQUEST);
+  }
 
-    if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
-      throw new HttpException('Invalid time range', HttpStatus.BAD_REQUEST);
-    }
+  const priority = this.reasonPriorityMap[reasonCategory] ?? 5;
 
-    const priority = this.reasonPriorityMap[reasonCategory] ?? 5;
-
-    const existing = await this.appointmentRepo.findOne({
-      where: {
-        slot: { id: slot.id },
-        startTime,
-        endTime,
-      },
-      relations: ['slot'],
-    });
-
-    if (existing) {
-      const existingAppointments = await this.appointmentRepo.find({
-        where: { slot: { id: slot.id } },
-        relations: ['slot'],
-      });
-
-      const bookedTimeSlots = existingAppointments.map(a => `${a.startTime}-${a.endTime}`);
-
-      const duration = end.diff(start, 'minute');
-      let current = slotStart.clone();
-
-      while (current.add(duration, 'minute').isBefore(slotEnd.add(1, 'second'))) {
-        const tempStart = current.format('HH:mm');
-        const tempEnd = current.add(duration, 'minute').format('HH:mm');
-
-        const slotKey = `${tempStart}-${tempEnd}`;
-        if (!bookedTimeSlots.includes(slotKey)) {
-          const appointment = this.appointmentRepo.create({
-            patient,
-            slot,
-            startTime: tempStart,
-            endTime: tempEnd,
-            reasonCategory,
-            reasonDescription: reasonDescription || '',
-            priority,
-            isUrgencyFinalized: false,
-          });
-          return this.appointmentRepo.save(appointment);
-        }
-
-        current = current.subtract(duration, 'minute').add(5, 'minute');
-      }
-
-        throw new HttpException(
-          'All slots booked. Please reschedule or choose another slot.',
-          HttpStatus.CONFLICT,
-        );
-    }
-    const appointment = this.appointmentRepo.create({
-      patient,
-      slot,
+  const existing = await this.appointmentRepo.findOne({
+    where: {
+      slot: { id: slot.id },
       startTime,
       endTime,
-      reasonCategory,
-      reasonDescription: reasonDescription || '',
-      priority,
-      isUrgencyFinalized: false,
-    });
+    },
+    relations: ['slot'],
+  });
 
-    return this.appointmentRepo.save(appointment);
+  if (existing) {
+    throw new HttpException(
+      'This slot is already booked. Please choose another time.',
+      HttpStatus.CONFLICT,
+    );
   }
+
+  const appointment = this.appointmentRepo.create({
+    patient,
+    slot,
+    startTime,
+    endTime,
+    reasonCategory,
+    reasonDescription: reasonDescription || '',
+    priority,
+    isUrgencyFinalized: false,
+  });
+
+  return this.appointmentRepo.save(appointment);
+}
+
 
   async getDoctorAppointmentsByDate(doctorId: number, date: string) {
     return this.appointmentRepo.find({
