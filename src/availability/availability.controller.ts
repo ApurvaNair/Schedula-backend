@@ -69,6 +69,18 @@ async getAvailableSubSlots(
   return this.availabilityService.getAvailableSubSlots(doctorId, date);
 }
 
+ @Patch('/slots/:id/shrink')
+async shrinkSlot(
+  @Param('id', ParseIntPipe) slotId: number,
+  @Body('newEndTime') newEndTime: string,
+) {
+  if (!newEndTime) {
+    throw new HttpException('New end time is required', HttpStatus.BAD_REQUEST);
+  }
+
+  return this.availabilityService.shrinkSlot(slotId, newEndTime);
+}
+
   @Patch(':id/slots/:slotId')
   @Roles('doctor')
   async rescheduleSlot(
