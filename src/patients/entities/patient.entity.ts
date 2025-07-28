@@ -1,3 +1,4 @@
+import { Appointment } from 'src/appointment/entities/appointment.entity';
 import { User } from 'src/users/entities/user.entity';
 import {
   Column,
