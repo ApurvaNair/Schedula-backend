@@ -1,4 +1,3 @@
-import { Appointment } from 'src/appointment/entities/appointment.entity';
 import { User } from 'src/users/entities/user.entity';
 import {
   Column,
@@ -16,12 +15,12 @@ export class Patient {
   id: number;
 
   @OneToOne(() => User, { eager: true, cascade: true })
-  @JoinColumn({ name: 'user_id' })
+  @JoinColumn({ name: 'user_id' }) 
   user: User;
 
   @Column()
   name: string;
-
+  
   @Column({ nullable: true })
   age: number;
 
