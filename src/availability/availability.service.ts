@@ -236,7 +236,12 @@ export class AvailabilityService {
     .andWhere('slot.date = :date', { date })
     .getMany();
 
-  const result: { sessionId: number; subSlotId: string; startTime: string; endTime: string }[] = [];
+  const result: {
+    sessionId: number;
+    subSlotId: string;
+    startTime: string;
+    endTime: string;
+  }[] = [];
 
   for (const s of sessions) {
     let t = dayjs(`${s.date}T${s.startTime}`);
@@ -249,8 +254,8 @@ export class AvailabilityService {
       if (en.isAfter(end)) break;
 
       const isBooked = appointments.some((a) => {
-        const apptStart = dayjs(`${a.date}T${a.startTime}`);
-        const apptEnd = dayjs(`${a.date}T${a.endTime}`);
+        const apptStart = dayjs(`${a.slot.date}T${a.startTime}`);
+        const apptEnd = dayjs(`${a.slot.date}T${a.endTime}`);
         return (
           a.slot.id === s.id &&
           st.isBefore(apptEnd) &&
@@ -267,12 +272,13 @@ export class AvailabilityService {
         });
       }
 
-      t = t.add(s.slotDuration, 'minute'); 
+      t = t.add(s.slotDuration, 'minute');
     }
   }
 
   return result;
 }
+
 
   async finalizeUrgency(appointmentId: number) {
   const appointment = await this.appointmentRepo.findOne({
