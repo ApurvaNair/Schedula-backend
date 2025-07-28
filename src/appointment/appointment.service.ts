@@ -1,6 +1,6 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThan, MoreThan, Repository } from 'typeorm';
 import { Appointment } from './entities/appointment.entity';
 import { Slot } from 'src/availability/entities/slot.entity';
 import { BookAppointmentDto } from './dto/book-appointment.dto';
@@ -73,6 +73,33 @@ export class AppointmentService {
     );
   }
 
+// const dayStart = new Date(dto.startTime);
+// dayStart.setHours(0, 0, 0, 0);
+
+// const dayEnd = new Date(dto.startTime);
+// dayEnd.setHours(23, 59, 59, 999);
+
+// const existing1 = await this.appointmentRepo
+//   .createQueryBuilder('appointment')
+//   .leftJoin('appointment.patient', 'patient')
+//   .where('patient.id = :patientId', { patientId: dto.patientId })
+//   .andWhere('appointment.startTime BETWEEN :startOfDay AND :endOfDay', {
+//     startOfDay: dayStart.toISOString(),
+//     endOfDay: dayEnd.toISOString(),
+//   })
+//   .andWhere('appointment.startTime < :endTime AND appointment.endTime > :startTime', {
+//     startTime: dto.startTime,
+//     endTime: dto.endTime,
+//   })
+//   .getOne();
+
+// if (existing1) {
+//   throw new HttpException(
+//     'You already have an appointment at this time.',
+//     HttpStatus.CONFLICT,
+//   );
+// }
+
   const appointment = this.appointmentRepo.create({
     patient,
     slot,
@@ -144,58 +171,6 @@ export class AppointmentService {
     return this.appointmentRepo.save(appointment);
   }
 
-  async shrinkSlot(slotId: number, newEndTime: string) {
-  const slot = await this.slotRepo.findOne({
-  where: { id: slotId },
-  relations: ['appointments', 'appointments.patient'],
-  });
-
-  if (!slot) throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
-
-  const newEnd = dayjs(`${slot.date}T${newEndTime}`);
-  const originalEnd = dayjs(`${slot.date}T${slot.endTime}`);
-
-  if (newEnd.isAfter(originalEnd)) {
-    throw new HttpException('New end time cannot be after original end', HttpStatus.BAD_REQUEST);
-  }
-
-  // Find affected appointments
-  const affectedAppointments = slot.appointments.filter(a =>
-    dayjs(`${slot.date}T${a.endTime}`).isAfter(newEnd)
-  );
-
-  const result: {
-  id: number;
-  patientId: number;
-  actionRequired: string;
-}[] = [];
-
-  for (const appointment of affectedAppointments) {
-    if (appointment.priority <= 2) {
-      result.push({
-        id: appointment.id,
-        patientId: appointment.patient.id,
-        actionRequired: 'High Priority: Accept post-session buffer / Cancel / Reschedule',
-      });
-    } else {
-      result.push({
-        id: appointment.id,
-        patientId: appointment.patient.id,
-        actionRequired: 'Cancel / Reschedule',
-      });
-    }
-  }
-
-  // Update the slot end time
-  slot.endTime = newEndTime;
-  await this.slotRepo.save(slot);
-
-  return {
-    message: 'Slot shrunk successfully',
-    affectedAppointments: result,
-  };
-}
-
   async cancelAppointment(id: number) {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new HttpException('Appointment not found', HttpStatus.NOT_FOUND);
@@ -236,14 +211,5 @@ export class AppointmentService {
 
   return await this.appointmentRepo.save(appointment);
 }
-  async finalizeUrgency(appointmentId: number, finalPriority: number): Promise<Appointment> {
-    const appointment = await this.appointmentRepo.findOne({ where: { id: appointmentId } });
-    if (!appointment) {
-      throw new HttpException('Appointment not found', HttpStatus.NOT_FOUND);
-    }
 
-    appointment.priority = finalPriority;
-    appointment.isUrgencyFinalized = true;
-    return this.appointmentRepo.save(appointment);
-  }
 }

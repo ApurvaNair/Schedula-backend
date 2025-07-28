@@ -69,9 +69,9 @@ async getAvailableSubSlots(
   return this.availabilityService.getAvailableSubSlots(doctorId, date);
 }
 
- @Patch('/slots/:id/shrink')
+ @Patch('/slots/:slotId/shrink')
 async shrinkSlot(
-  @Param('id', ParseIntPipe) slotId: number,
+  @Param('slotId', ParseIntPipe) slotId: number,
   @Body('newEndTime') newEndTime: string,
 ) {
   if (!newEndTime) {
@@ -101,5 +101,12 @@ async shrinkSlot(
     }
 
     return this.availabilityService.rescheduleSlot(doctorId, slotId, updateData);
+  }
+  @Patch(':id/finalize-urgency')
+  async finalizeUrgency(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { finalPriority: number },
+  ) {
+    return this.availabilityService.finalizeUrgency(id);
   }
 }

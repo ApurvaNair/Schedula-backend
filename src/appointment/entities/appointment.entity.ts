@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Slot } from 'src/availability/entities/slot.entity';
 import { Patient } from 'src/patients/entities/patient.entity';
 
@@ -7,10 +7,12 @@ export class Appointment {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Slot, (slot) => slot.appointments, { eager: true })
+  @ManyToOne(() => Slot, (slot) => slot.appointments)
+  @JoinColumn({ name: 'slot_id' })
   slot: Slot;
 
-  @ManyToOne(() => Patient, (patient) => patient.appointments, { eager: true })
+  @ManyToOne(() => Patient, (patient) => patient.appointments)
+  @JoinColumn({ name: 'patient_id' })
   patient: Patient;
 
   @Column()
@@ -30,4 +32,5 @@ export class Appointment {
 
   @Column()
   endTime: string;
+  date: any;
 }
