@@ -30,13 +30,12 @@ export class AuthController {
   }
 
   @Post('auth/login')
-  async login(
-    @Body() dto: LoginDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.authService.login(dto);
-    res.setHeader('Authorization', `Bearer ${result.token}`);
-    return { message: result.message };
+  async login(@Body() loginDto: LoginDto, @Res() res: Response) {
+    const result = await this.authService.login(loginDto);
+    const token = result.token;
+
+    res.setHeader('Authorization', `Bearer ${token}`);
+    return res.send({ message: 'Login successful' });
   }
 
   @UseGuards(JwtAuthGuard)

@@ -10,11 +10,13 @@ import {
   HttpException,
   HttpStatus,
   ParseIntPipe,
+  Patch,
 } from '@nestjs/common';
 import { AvailabilityService } from './availability.service';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { Roles } from 'src/auth/roles.decorator';
+import { CreateSlotDto } from './dto/create-slot.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('api/doctors')
@@ -31,22 +33,12 @@ export class AvailabilityController {
   async addAvailability(
     @Param('id', ParseIntPipe) doctorId: number,
     @Request() req,
-    @Body()
-    body: {
-      date: string;
-      startTime: string;
-      endTime: string;
-      mode: string;
-      maxBookings: number;
-    },
+    @Body() body: CreateSlotDto,
   ) {
     const doctor = await this.availabilityService.getDoctorById(doctorId);
 
     if (doctor.user.id !== req.user.id) {
-      throw new HttpException(
-        'Only the doctor can add availability to their profile',
-        HttpStatus.FORBIDDEN,
-      );
+      throw new HttpException('Only the doctor can add availability', HttpStatus.FORBIDDEN);
     }
 
     return this.availabilityService.createSlot(doctorId, body);
@@ -62,12 +54,52 @@ export class AvailabilityController {
     const doctor = await this.availabilityService.getDoctorById(doctorId);
 
     if (doctor.user.id !== req.user.id) {
-      throw new HttpException(
-        'Only the doctor can delete this slot',
-        HttpStatus.FORBIDDEN,
-      );
+      throw new HttpException('Only the doctor can delete this slot', HttpStatus.FORBIDDEN);
     }
 
     return this.availabilityService.deleteSlot(slotId, doctorId);
+  }
+
+  @Get(':id/sub-slots/:date')
+@Roles('doctor')
+async getAvailableSubSlots(
+  @Param('id', ParseIntPipe) doctorId: number,
+  @Param('date') date: string
+) {
+  return this.availabilityService.getAvailableSubSlots(doctorId, date);
+}
+
+ @Patch('/slots/:id/shrink')
+async shrinkSlot(
+  @Param('id', ParseIntPipe) slotId: number,
+  @Body('newEndTime') newEndTime: string,
+) {
+  if (!newEndTime) {
+    throw new HttpException('New end time is required', HttpStatus.BAD_REQUEST);
+  }
+
+  return this.availabilityService.shrinkSlot(slotId, newEndTime);
+}
+
+  @Patch(':id/slots/:slotId')
+  @Roles('doctor')
+  async rescheduleSlot(
+    @Param('id', ParseIntPipe) doctorId: number,
+    @Param('slotId', ParseIntPipe) slotId: number,
+    @Request() req,
+    @Body() updateData: {
+      date?: string;
+      startTime?: string;
+      endTime?: string;
+      mode?: string;
+    },
+  ) {
+    const doctor = await this.availabilityService.getDoctorById(doctorId);
+
+    if (doctor.user.id !== req.user.id) {
+      throw new HttpException('Only the doctor can update this slot', HttpStatus.FORBIDDEN);
+    }
+
+    return this.availabilityService.rescheduleSlot(doctorId, slotId, updateData);
   }
 }
