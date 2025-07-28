@@ -1,5 +1,14 @@
+import { Appointment } from 'src/appointment/entities/appointment.entity';
 import { User } from 'src/users/entities/user.entity';
-import { Column, Entity, PrimaryGeneratedColumn, OneToOne, JoinColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  PrimaryGeneratedColumn,
+  OneToOne,
+  JoinColumn,
+  OneToMany,
+  ManyToOne,
+} from 'typeorm';
 
 @Entity()
 export class Patient {
@@ -27,4 +36,11 @@ export class Patient {
 
   @Column({ nullable: true })
   medicalHistory: string;
+
+  @OneToMany(() => Appointment, (appointment) => appointment.patient)
+  appointments: Appointment[];
+
+  @ManyToOne(() => Patient, (patient) => patient.appointments, { eager: true })
+patient: Patient;
+
 }
