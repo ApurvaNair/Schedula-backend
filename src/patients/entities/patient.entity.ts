@@ -21,7 +21,7 @@ export class Patient {
 
   @Column()
   name: string;
-
+  
   @Column({ nullable: true })
   age: number;
 
