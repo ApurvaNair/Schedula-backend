@@ -15,13 +15,14 @@ export class Patient {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @OneToOne(() => User, { eager:true, cascade: true })
-  @JoinColumn({ name: 'user_id' })
+  @OneToOne(() => User, { eager: true, cascade: true })
+  @JoinColumn({ name: 'user_id' }) 
+
   user: User;
 
   @Column()
   name: string;
-
+  
   @Column({ nullable: true })
   age: number;
 
