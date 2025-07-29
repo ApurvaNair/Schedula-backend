@@ -15,7 +15,7 @@ export class Patient {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @OneToOne(() => User, { eager:true, cascade: true })
+  @OneToOne(() => User, { eager: true, cascade: true })
   @JoinColumn({ name: 'user_id' })
   user: User;
 
