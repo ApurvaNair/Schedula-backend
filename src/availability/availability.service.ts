@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
 import dayjs from 'dayjs';
@@ -7,6 +7,7 @@ import { Doctor } from '../doctors/entities/doctor.entity';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { Appointment } from 'src/appointment/entities/appointment.entity';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
+import { v4 as uuidv4 } from 'uuid';
 import { AppointmentService } from 'src/appointment/appointment.service';
 
 dayjs.extend(isSameOrBefore);
@@ -88,40 +89,149 @@ export class AvailabilityService {
     });
   }
 
-  async createSlot(doctorId: number, dto: CreateSlotDto): Promise<Slot> {
-    const { date, startTime, endTime, mode, maxBookings, slotDuration } = dto;
-    const now = dayjs();
-    const start = dayjs(`${date}T${startTime}`);
-    const end = dayjs(`${date}T${endTime}`);
+async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
+  const {
+    date,
+    startDate,
+    endDate,
+    daysOfWeek,
+    startTime,
+    endTime,
+    mode,
+    maxBookings,
+    slotDuration,
+  } = dto;
 
-    if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
-      throw new HttpException('Invalid session time range', HttpStatus.BAD_REQUEST);
+  const now = dayjs();
+
+  const isRecurring = !!startDate && !!endDate && Array.isArray(daysOfWeek) && daysOfWeek.length > 0;
+  const recurringId: string | undefined = isRecurring ? uuidv4() : undefined;
+
+  if (isRecurring) {
+    const start = dayjs(startDate);
+    const end = dayjs(endDate);
+
+    if (!start.isValid() || !end.isValid() || start.isAfter(end)) {
+      throw new HttpException('Invalid recurring date range', HttpStatus.BAD_REQUEST);
     }
-    if (start.isBefore(now)) {
-      throw new HttpException('Cannot create session in the past', HttpStatus.BAD_REQUEST);
+
+    const created: Slot[] = [];
+
+    for (let d = start; d.isSameOrBefore(end); d = d.add(1, 'day')) {
+      const dayName = d.format('dddd').toUpperCase();
+
+      if (daysOfWeek.includes(dayName)) {
+        if (d.isBefore(now, 'day')) continue;
+
+        const dateStr = d.format('YYYY-MM-DD');
+
+        const startDt = dayjs(`${dateStr}T${startTime}`);
+        const endDt = dayjs(`${dateStr}T${endTime}`);
+
+        if (!startDt.isValid() || !endDt.isValid() || !endDt.isAfter(startDt)) continue;
+
+        const exists = await this.slotRepo.findOne({
+          where: {
+            doctor: { id: doctorId },
+            date: dateStr,
+            startTime,
+            endTime,
+          },
+        });
+        if (exists) continue;
+
+        const session = this.slotRepo.create({
+          doctor: { id: doctorId },
+          date: dateStr,
+          startTime,
+          endTime,
+          mode,
+          maxBookings,
+          slotDuration,
+          recurringId, 
+        });
+
+        created.push(session);
+      }
     }
 
-    const existing = await this.slotRepo.findOne({
-      where: {
-        doctor: { id: doctorId },
-        date,
-        startTime,
-        endTime,
-      },
-    });
-    if (existing) throw new HttpException('Duplicate session not allowed', HttpStatus.CONFLICT);
+    await this.slotRepo.save(created);
+    return {
+      message: 'Recurring slots created',
+      recurringId,
+      count: created.length,
+    };
+  }
 
-    const session = this.slotRepo.create({
+  // One-time slot creation
+  if (!date) {
+    throw new HttpException('Date is required for one-time slot', HttpStatus.BAD_REQUEST);
+  }
+
+  const start = dayjs(`${date}T${startTime}`);
+  const end = dayjs(`${date}T${endTime}`);
+
+  if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
+    throw new HttpException('Invalid session time range', HttpStatus.BAD_REQUEST);
+  }
+  if (start.isBefore(now)) {
+    throw new HttpException('Cannot create session in the past', HttpStatus.BAD_REQUEST);
+  }
+
+  const existing = await this.slotRepo.findOne({
+    where: {
       doctor: { id: doctorId },
       date,
       startTime,
       endTime,
-      mode,
-      maxBookings,
-      slotDuration,
-    });
-    return this.slotRepo.save(session);
+    },
+  });
+  if (existing) {
+    throw new HttpException('Duplicate session not allowed', HttpStatus.CONFLICT);
   }
+
+  const session = this.slotRepo.create({
+    doctor: { id: doctorId },
+    date,
+    startTime,
+    endTime,
+    mode,
+    maxBookings,
+    slotDuration,
+    recurringId: null, 
+  });
+
+  return this.slotRepo.save(session);
+}
+
+async deleteRecurringSlots(doctorId: number, recurringId: string) {
+  const deleted = await this.slotRepo.delete({
+    doctor: { id: doctorId },
+    recurringId,
+  });
+
+  if (deleted.affected === 0) {
+    throw new NotFoundException('No recurring slots found');
+  }
+
+  return { message: 'All recurring slots deleted successfully' };
+}
+async deleteRecurringSlotsFromDate(doctorId: number, recurringId: string, fromDate: string) {
+  const deleted = await this.slotRepo
+    .createQueryBuilder()
+    .delete()
+    .from(Slot)
+    .where('doctorId = :doctorId', { doctorId })
+    .andWhere('recurringId = :recurringId', { recurringId })
+    .andWhere('date >= :fromDate', { fromDate })
+    .execute();
+
+  if (deleted.affected === 0) {
+    throw new NotFoundException('No matching recurring slots found from given date');
+  }
+
+  return { message: 'Recurring slots from specified date deleted successfully' };
+}
 
   async deleteSlot(slotId: number, doctorId: number) {
   const slot = await this.slotRepo.findOne({
