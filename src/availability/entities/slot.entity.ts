@@ -28,6 +28,9 @@ export class Slot {
   @Column({ nullable: true })
   bufferDuration: number;
 
+  @Column({ nullable: true, type: 'uuid' })
+  recurringId: string | null;
+
   @ManyToOne(() => Doctor, (doctor) => doctor.slots, { eager: true })
   doctor: Doctor;
 
