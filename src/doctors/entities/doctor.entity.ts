@@ -35,7 +35,7 @@ export class Doctor {
 
   @Column({ nullable: true })
   bio: string;
-
+z
   @OneToMany(() => Slot, (slot) => slot.doctor)
   slots: Slot[];
 }

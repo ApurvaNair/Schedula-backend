@@ -26,15 +26,15 @@ export class CreateSlotDto {
   mode: string;
 
   @IsInt()
-  @Min(1)
+  @Min(1, { message: 'slotDuration must be at least 1 minute' })
   slotDuration: number;
 
   @ValidateIf((o) => o.mode === 'wave')
-  @IsInt({ message: 'maxBookings must be an integer' })
+  @IsInt({ message: 'maxBookings must be an integer if mode is wave' })
   @Min(1, { message: 'maxBookings must be at least 1 for wave mode' })
   maxBookings?: number;
 
-  @ValidateIf((o) => !o.date) 
+  @ValidateIf((o) => !o.date)
   @IsOptional()
   @IsDateString()
   startDate?: string;
@@ -49,4 +49,12 @@ export class CreateSlotDto {
   @IsArray()
   @ArrayNotEmpty({ message: 'daysOfWeek should not be empty if provided' })
   daysOfWeek?: string[];
+
+  @IsIn(['normal', 'buffer'], { message: 'type must be either normal or buffer' })
+  type: string;
+
+  @ValidateIf((o) => o.type === 'buffer')
+  @IsInt({ message: 'bufferDuration is required for buffer type' })
+  @Min(1, { message: 'bufferDuration must be at least 1 minute' })
+  bufferDuration?: number;
 }

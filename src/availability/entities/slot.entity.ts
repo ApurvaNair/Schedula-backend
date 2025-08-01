@@ -31,9 +31,13 @@ export class Slot {
   @Column({ nullable: true, type: 'uuid' })
   recurringId: string | null;
 
+  @Column({ default: 'normal' }) 
+  type: string;
+
   @ManyToOne(() => Doctor, (doctor) => doctor.slots, { eager: true })
   doctor: Doctor;
 
   @OneToMany(() => Appointment, (appointment) => appointment.slot)
   appointments: Appointment[];
+  isBooked: boolean;
 }

@@ -1,6 +1,6 @@
 import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
+import { Repository, Not, IsNull } from 'typeorm';
 import dayjs from 'dayjs';
 import { Slot } from './entities/slot.entity';
 import { Doctor } from '../doctors/entities/doctor.entity';
@@ -20,8 +20,8 @@ export class AvailabilityService {
     private slotRepo: Repository<Slot>,
     @InjectRepository(Doctor)
     private doctorRepo: Repository<Doctor>,
-    @InjectRepository(Appointment)
-    private appointmentRepo: Repository<Appointment>,
+    @InjectRepository(Appointment) private appointmentRepo: Repository<Appointment>,
+    private appointmentService: AppointmentService,
   ) {}
 
   async getDoctorById(doctorId: number): Promise<Doctor> {
@@ -33,55 +33,127 @@ export class AvailabilityService {
     return doctor;
   }
 
-  async shrinkSlot(slotId: number, newEndTime: string) {
-    const slot = await this.slotRepo.findOne({
+  async shrinkSlot(slotId: number, newEndTime: string, user:any) {
+  const slot = await this.slotRepo.findOne({
     where: { id: slotId },
-    relations: ['appointments', 'appointments.patient'],
-    });
-  
-    if (!slot) throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
-  
-    const newEnd = dayjs(`${slot.date}T${newEndTime}`);
-    const originalEnd = dayjs(`${slot.date}T${slot.endTime}`);
-  
-    if (newEnd.isAfter(originalEnd)) {
-      throw new HttpException('New end time cannot be after original end', HttpStatus.BAD_REQUEST);
-    }
-  
-    const affectedAppointments = slot.appointments.filter(a =>
-      dayjs(`${slot.date}T${a.endTime}`).isAfter(newEnd)
+    relations: ['doctor','appointments', 'appointments.patient'],
+  });
+
+  if (!slot) throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
+
+  if (slot.doctor.id !== user.id) {
+    throw new HttpException('Forbidden: You do not own this slot', HttpStatus.FORBIDDEN);
+  }
+  const newEnd = dayjs(`${slot.date}T${newEndTime}`);
+  const originalEnd = dayjs(`${slot.date}T${slot.endTime}`);
+  if (newEnd.isAfter(originalEnd)) {
+    throw new HttpException('New end time cannot be after original end', HttpStatus.BAD_REQUEST);
+  }
+
+  const affectedAppointments = slot.appointments.filter(a =>
+    dayjs(`${slot.date}T${a.endTime}`).isAfter(newEnd)
+  );
+
+  affectedAppointments.sort((a, b) => a.priority - b.priority);
+
+  const subslots = await this.slotRepo.find({
+    where: {
+      doctor: slot.doctor,
+      date: slot.date,
+      type: 'normal',
+    },
+    relations: ['appointments'],
+  });
+
+  const now = dayjs();
+
+  const availableSubslots = subslots.filter(s => {
+    const subEnd = dayjs(`${s.date}T${s.endTime}`);
+    const subStart = dayjs(`${s.date}T${s.startTime}`);
+    return (
+      s.appointments.length === 0 &&
+      subEnd.isSameOrBefore(newEnd) &&
+      subStart.isAfter(now) // ✅ Only future subslots
     );
-  
-    const result: {
+  });
+
+  const result: {
     id: number;
     patientId: number;
     actionRequired: string;
   }[] = [];
-  
-     for (const appointment of affectedAppointments) {
-    if (appointment.priority <= 2 && !appointment.isUrgencyFinalized) {
-      result.push({
-        id: appointment.id,
-        patientId: appointment.patient.id,
-        actionRequired: 'Doctor Review: Emergency case',
-      });
-    } else {
-      result.push({
-        id: appointment.id,
-        patientId: appointment.patient.id,
-        actionRequired: 'Cancel / Reschedule',
-      });
+
+  let hasUnresolvedUrgentCases = false;
+
+  for (const appointment of affectedAppointments) {
+    let moved = false;
+
+    for (let i = 0; i < availableSubslots.length; i++) {
+      const subslot = availableSubslots[i];
+      const duration = dayjs(`${slot.date}T${appointment.endTime}`).diff(
+        dayjs(`${slot.date}T${appointment.startTime}`),
+        'minute'
+      );
+
+      const subStart = dayjs(`${subslot.date}T${subslot.startTime}`);
+      const subEnd = dayjs(`${subslot.date}T${subslot.endTime}`);
+      const subDuration = subEnd.diff(subStart, 'minute');
+
+      if (subDuration >= duration) {
+        // ✅ Move appointment to this subslot
+        appointment.slot = subslot;
+        appointment.startTime = subslot.startTime;
+        appointment.endTime = subslot.endTime;
+
+        await this.appointmentRepo.save(appointment);
+
+        result.push({
+          id: appointment.id,
+          patientId: appointment.patient.id,
+          actionRequired: 'Moved to available subslot',
+        });
+
+        availableSubslots.splice(i, 1); // Mark slot as occupied
+        moved = true;
+        break;
+      }
+    }
+
+    if (!moved) {
+      if (appointment.priority === 1 && !appointment.isUrgencyFinalized) {
+        result.push({
+          id: appointment.id,
+          patientId: appointment.patient.id,
+          actionRequired: 'Doctor Review: Emergency case',
+        });
+        hasUnresolvedUrgentCases = true;
+      } else {
+        result.push({
+          id: appointment.id,
+          patientId: appointment.patient.id,
+          actionRequired: 'Cancel / Reschedule',
+        });
+      }
     }
   }
-    slot.endTime = newEndTime;
-    await this.slotRepo.save(slot);
-  
+
+  if (hasUnresolvedUrgentCases) {
     return {
-      message: 'Slot shrunk successfully',
+      message: 'Cannot shrink until doctor reviews and finalizes urgent appointments',
       affectedAppointments: result,
     };
   }
-  
+
+  slot.endTime = newEndTime;
+  await this.slotRepo.save(slot);
+
+  return {
+    message: 'Slot window successfully shrunk',
+    affectedAppointments: result,
+  };
+}
+
+
   async getDoctorSlots(doctorId: number): Promise<Slot[]> {
     return this.slotRepo.find({
       where: { doctor: { id: doctorId } },
@@ -100,6 +172,7 @@ async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
     mode,
     maxBookings,
     slotDuration,
+    type = 'normal', 
   } = dto;
 
   const now = dayjs();
@@ -124,7 +197,6 @@ async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
         if (d.isBefore(now, 'day')) continue;
 
         const dateStr = d.format('YYYY-MM-DD');
-
         const startDt = dayjs(`${dateStr}T${startTime}`);
         const endDt = dayjs(`${dateStr}T${endTime}`);
 
@@ -136,8 +208,10 @@ async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
             date: dateStr,
             startTime,
             endTime,
+            type,
           },
         });
+
         if (exists) continue;
 
         const session = this.slotRepo.create({
@@ -148,7 +222,8 @@ async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
           mode,
           maxBookings,
           slotDuration,
-          recurringId, 
+          recurringId,
+          type,
         });
 
         created.push(session);
@@ -163,7 +238,6 @@ async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
     };
   }
 
-  // One-time slot creation
   if (!date) {
     throw new HttpException('Date is required for one-time slot', HttpStatus.BAD_REQUEST);
   }
@@ -174,6 +248,7 @@ async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
   if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
     throw new HttpException('Invalid session time range', HttpStatus.BAD_REQUEST);
   }
+
   if (start.isBefore(now)) {
     throw new HttpException('Cannot create session in the past', HttpStatus.BAD_REQUEST);
   }
@@ -184,8 +259,10 @@ async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
       date,
       startTime,
       endTime,
+      type,
     },
   });
+
   if (existing) {
     throw new HttpException('Duplicate session not allowed', HttpStatus.CONFLICT);
   }
@@ -198,7 +275,8 @@ async createSlot(doctorId: number, dto: CreateSlotDto): Promise<any> {
     mode,
     maxBookings,
     slotDuration,
-    recurringId: null, 
+    recurringId: null,
+    type,
   });
 
   return this.slotRepo.save(session);
@@ -266,73 +344,75 @@ async deleteRecurringSlotsFromDate(doctorId: number, recurringId: string, fromDa
   };
 }
 
+async rescheduleSlot(
+  doctorId: number,
+  slotId: number,
+  data: { date?: string; startTime?: string; endTime?: string },
+): Promise<Slot> {
+  const slot = await this.slotRepo.findOne({
+    where: { id: slotId, doctor: { id: doctorId } },
+  });
+  if (!slot) throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
 
-  async rescheduleSlot(
-    doctorId: number,
-    slotId: number,
-    data: { date?: string; startTime?: string; endTime?: string },
-  ): Promise<Slot> {
-    const slot = await this.slotRepo.findOne({
-      where: { id: slotId, doctor: { id: doctorId } },
-    });
-    if (!slot) throw new HttpException('Slot not found', HttpStatus.NOT_FOUND);
+  slot.date = data.date || slot.date;
+  slot.startTime = data.startTime || slot.startTime;
+  slot.endTime = data.endTime || slot.endTime;
 
-    slot.date = data.date || slot.date;
-    slot.startTime = data.startTime || slot.startTime;
-    slot.endTime = data.endTime || slot.endTime;
+  const start = dayjs(`${slot.date}T${slot.startTime}`);
+  const end = dayjs(`${slot.date}T${slot.endTime}`);
+  const now = dayjs();
 
-    const start = dayjs(`${slot.date}T${slot.startTime}`);
-    const end = dayjs(`${slot.date}T${slot.endTime}`);
-    const now = dayjs();
+  if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
+    throw new HttpException('Invalid session range', HttpStatus.BAD_REQUEST);
+  }
+  if (start.isBefore(now)) {
+    throw new HttpException('Cannot reschedule into the past', HttpStatus.BAD_REQUEST);
+  }
 
-    if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
-      throw new HttpException('Invalid session range', HttpStatus.BAD_REQUEST);
+  const otherSlots = await this.slotRepo.find({
+    where: {
+      doctor: { id: doctorId },
+      date: slot.date,
+      id: Not(slot.id),
+    },
+  });
+
+  for (const s of otherSlots) {
+    const sStart = dayjs(`${s.date}T${s.startTime}`);
+    const sEnd = dayjs(`${s.date}T${s.endTime}`);
+
+    if (start.isBefore(sEnd) && end.isAfter(sStart)) {
+      throw new HttpException(`Conflicts with slot ${s.startTime}-${s.endTime}`, HttpStatus.CONFLICT);
     }
-    if (start.isBefore(now)) {
-      throw new HttpException('Cannot reschedule into the past', HttpStatus.BAD_REQUEST);
-    }
+  }
 
-    const otherSlots = await this.slotRepo.find({
-      where: {
+  const doctorAppointments = await this.appointmentRepo.find({
+    where: {
+      slot: {
         doctor: { id: doctorId },
         date: slot.date,
-        id: Not(slot.id),
       },
-    });
+    },
+    relations: ['slot'],
+  });
 
-    for (const s of otherSlots) {
-      const sStart = dayjs(`${s.date}T${s.startTime}`);
-      const sEnd = dayjs(`${s.date}T${s.endTime}`);
+  for (const appt of doctorAppointments) {
+    // ❗ Ignore appointments that belong to this same slot
+    if (appt.slot.id === slot.id) continue;
 
-      if (start.isBefore(sEnd) && end.isAfter(sStart)) {
-        throw new HttpException(`Conflicts with slot ${s.startTime}-${s.endTime}`, HttpStatus.CONFLICT);
-      }
+    const apptStart = dayjs(`${slot.date}T${appt.startTime}`);
+    const apptEnd = dayjs(`${slot.date}T${appt.endTime}`);
+
+    if (start.isBefore(apptEnd) && end.isAfter(apptStart)) {
+      throw new HttpException(
+        `Conflicts with existing appointment ${appt.startTime}-${appt.endTime}`,
+        HttpStatus.CONFLICT,
+      );
     }
-
-    const doctorAppointments = await this.appointmentRepo.find({
-      where: {
-        slot: {
-          doctor: { id: doctorId },
-          date: slot.date,
-        },
-      },
-      relations: ['slot'],
-    });
-
-    for (const appt of doctorAppointments) {
-      const apptStart = dayjs(`${slot.date}T${appt.startTime}`);
-      const apptEnd = dayjs(`${slot.date}T${appt.endTime}`);
-
-      if (start.isBefore(apptEnd) && end.isAfter(apptStart)) {
-        throw new HttpException(
-          `Conflicts with existing appointment ${appt.startTime}-${appt.endTime}`,
-          HttpStatus.CONFLICT,
-        );
-      }
-    }
-
-    return this.slotRepo.save(slot);
   }
+
+  return this.slotRepo.save(slot);
+}
 
  async getAvailableSubSlots(doctorId: number, date: string) {
   const sessions = await this.slotRepo.find({
@@ -390,24 +470,61 @@ async deleteRecurringSlotsFromDate(doctorId: number, recurringId: string, fromDa
 }
 
 
-  async finalizeUrgency(appointmentId: number) {
+async finalizeUrgency(appointmentId: number, isUrgent: boolean, user: any) {
   const appointment = await this.appointmentRepo.findOne({
-    where: { id: appointmentId },
+    where: {
+  id: appointmentId,
+  priority: 1,
+  isUrgencyFinalized: false,
+},
     relations: ['slot'],
   });
 
   if (!appointment) {
-    throw new HttpException('Appointment not found', HttpStatus.NOT_FOUND);
+    throw new HttpException('No urgent appointment found', HttpStatus.NOT_FOUND);
+  }
+
+  let message: string;
+
+  if (appointment.slot.doctor.id !== user.id) {
+    throw new HttpException('Forbidden: You do not own this appointment\'s slot', HttpStatus.FORBIDDEN);
+  }
+
+  if (isUrgent) {
+    const bufferSlots = await this.slotRepo.find({
+      where: {
+        date: appointment.slot.date,
+        type: 'buffer',
+      },
+      relations: ['appointments'],
+    });
+
+    const availableBuffer = bufferSlots.find(
+      (slot) => slot.appointments.filter((app) => app.priority).length < slot.maxBookings,
+    );
+
+    if (availableBuffer) {
+      appointment.slot = availableBuffer;
+      appointment.startTime = availableBuffer.startTime;
+      appointment.endTime = availableBuffer.endTime;
+      message = 'Moved to buffer';
+    } else {
+      message = 'No buffer available, appointment marked for Cancel/Reschedule';
+    }
+  } else {
+    const updatedPriority = this.appointmentService.getPriorityFromReason(appointment.reasonCategory);
+    appointment.priority = updatedPriority;
+    message = 'Marked as non-urgent. Suggest Cancel/Reschedule';
   }
 
   appointment.isUrgencyFinalized = true;
- 
   await this.appointmentRepo.save(appointment);
 
   return {
-    message: 'Urgency finalized',
-    appointmentId
+    message,
+    updatedPriority: appointment.priority,
   };
 }
+
 
 }
