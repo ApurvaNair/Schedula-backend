@@ -25,7 +25,7 @@ export class AppointmentService {
     private patientRepo: Repository<Patient>,
   ) {}
 
-  private reasonPriorityMap = {
+  public reasonPriorityMap = {
     'Chest Pain': 1,
     'Accident': 1,
     'Fever': 2,
@@ -34,7 +34,9 @@ export class AppointmentService {
     'General Consultation': 5,
     'Other': 5,
   };
-
+  public getPriorityFromReason(reason: string): number {
+  return this.reasonPriorityMap[reason] ?? 5;
+   }
   async bookAppointment(dto: BookAppointmentDto): Promise<Appointment> {
     const { slotId, patientId, reasonCategory, reasonDescription, startTime, endTime } = dto;
 
@@ -53,6 +55,10 @@ if (existingAppointment) {
 
     const patient = await this.patientRepo.findOne({ where: { id: patientId } });
     if (!patient) throw new HttpException('Patient not found', HttpStatus.NOT_FOUND);
+
+    if (slot.type === 'buffer') {
+     throw new HttpException('Cannot book a buffer slot directly', HttpStatus.BAD_REQUEST);
+    }
 
      const duplicateBooking = await this.appointmentRepo.findOne({
     where: {
@@ -74,7 +80,7 @@ if (existingAppointment) {
       throw new HttpException('Invalid time range', HttpStatus.BAD_REQUEST);
     }
 
-    const priority = this.reasonPriorityMap[reasonCategory] ?? 5;
+    const priority = this.getPriorityFromReason(reasonCategory);
 
     const existing = await this.appointmentRepo.findOne({
       where: {
@@ -164,37 +170,4 @@ if (existingAppointment) {
     return this.appointmentRepo.remove(appt);
   }
 
-  async confirmBufferSlot(dto: ConfirmBufferDto) {
-    const { slotId, patientId, startTime, endTime, reasonCategory, reasonDescription, priority } = dto;
-
-    const slot = await this.slotRepo.findOne({ where: { id: slotId } });
-    const patient = await this.patientRepo.findOne({ where: { id: patientId } });
-
-    if (!slot || !patient) {
-      throw new HttpException('Invalid slot or patient', HttpStatus.BAD_REQUEST);
-    }
-
-    const conflict = await this.appointmentRepo.findOne({
-      where: {
-        slot: slot,
-        startTime: startTime,
-      },
-    });
-
-    if (conflict) {
-      throw new HttpException('Buffer slot already booked', HttpStatus.CONFLICT);
-    }
-
-    const appointment = this.appointmentRepo.create({
-      patient,
-      slot,
-      startTime,
-      endTime,
-      reasonCategory,
-      reasonDescription: reasonDescription || '',
-      isUrgencyFinalized: false,
-    });
-
-    return await this.appointmentRepo.save(appointment);
-  }
 }

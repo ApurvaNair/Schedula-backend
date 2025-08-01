@@ -21,7 +21,7 @@ export class Appointment {
   @Column({ nullable: true })
   reasonDescription: string;
 
-  @Column()
+  @Column({default:5})
   priority: number;
 
   @Column({ default: false })
@@ -33,4 +33,5 @@ export class Appointment {
   @Column()
   endTime: string;
   date: any;
+  reason: string;
 }

@@ -23,6 +23,19 @@ import { CreateSlotDto } from './dto/create-slot.dto';
 export class AvailabilityController {
   constructor(private readonly availabilityService: AvailabilityService) {}
 
+  @Patch('/slots/:slotId/shrink')
+async shrinkSlot(
+  @Param('slotId', ParseIntPipe) slotId: number,
+  @Body('newEndTime') newEndTime: string,
+  @Request() req,
+) {
+  if (!newEndTime) {
+    throw new HttpException('New end time is required', HttpStatus.BAD_REQUEST);
+  }
+
+  return this.availabilityService.shrinkSlot(slotId, newEndTime,req.user);
+}
+
   @Get(':id/slots')
   async getDoctorSlots(@Param('id', ParseIntPipe) doctorId: number) {
     return this.availabilityService.getDoctorSlots(doctorId);
@@ -69,18 +82,6 @@ async getAvailableSubSlots(
   return this.availabilityService.getAvailableSubSlots(doctorId, date);
 }
 
-@Patch('/slots/:slotId/shrink')
-async shrinkSlot(
-  @Param('slotId', ParseIntPipe) slotId: number,
-  @Body('newEndTime') newEndTime: string,
-) {
-  if (!newEndTime) {
-    throw new HttpException('New end time is required', HttpStatus.BAD_REQUEST);
-  }
-
-  return this.availabilityService.shrinkSlot(slotId, newEndTime);
-}
-
 @Patch(':id/slots/:slotId')
 @Roles('doctor')
   async rescheduleSlot(
@@ -101,13 +102,6 @@ async shrinkSlot(
     }
 
     return this.availabilityService.rescheduleSlot(doctorId, slotId, updateData);
-  }
-@Patch(':id/finalize-urgency')
-async finalizeUrgency(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() body: { finalPriority: number },
-  ) {
-    return this.availabilityService.finalizeUrgency(id);
   }
 
 @Delete(':id/recurring/:recurringId')
