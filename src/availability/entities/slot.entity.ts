@@ -16,7 +16,7 @@ export class Slot {
   @Column()
   endTime: string;
 
-  @Column({ default: 'stream' }) // stream or wave
+  @Column({ default: 'stream' }) 
   mode: string;
 
   @Column({ nullable: true })

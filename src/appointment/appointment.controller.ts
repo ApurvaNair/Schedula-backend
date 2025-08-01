@@ -56,11 +56,4 @@ export class AppointmentController {
     return this.appointmentService.cancelAppointment(id);
   }
 
-   @Patch(':id/finalize-urgency')
-  async finalizeUrgency(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() body: { finalPriority: number },
-  ) {
-    return this.appointmentService.finalizeUrgency(id, body.finalPriority);
-  }
 }
