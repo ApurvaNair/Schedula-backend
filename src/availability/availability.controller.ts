@@ -33,59 +33,59 @@ async shrinkSlot(
     throw new HttpException('New end time is required', HttpStatus.BAD_REQUEST);
   }
 
-  return this.availabilityService.shrinkSlot(slotId, newEndTime,req.user);
+  return this.availabilityService.shrinkSlot(slotId, newEndTime);
 }
 
   @Get(':id/slots')
-  async getDoctorSlots(@Param('id', ParseIntPipe) doctorId: number) {
-    return this.availabilityService.getDoctorSlots(doctorId);
+  async getDoctorSlots(@Param('id', ParseIntPipe) id: number) {
+    return this.availabilityService.getDoctorSlots(id);
   }
 
   @Post(':id/slots')
   @Roles('doctor')
   async addAvailability(
-    @Param('id', ParseIntPipe) doctorId: number,
+    @Param('id', ParseIntPipe) id: number,
     @Request() req,
     @Body() body: CreateSlotDto,
   ) {
-    const doctor = await this.availabilityService.getDoctorById(doctorId);
+    const doctor = await this.availabilityService.getDoctorById(id);
 
     if (doctor.user.id !== req.user.id) {
       throw new HttpException('Only the doctor can add availability', HttpStatus.FORBIDDEN);
     }
 
-    return this.availabilityService.createSlot(doctorId, body);
+    return this.availabilityService.createSlot(id, body);
   }
 
   @Delete(':id/slots/:slotId')
   @Roles('doctor')
   async deleteSlot(
-    @Param('id', ParseIntPipe) doctorId: number,
+    @Param('id', ParseIntPipe) id: number,
     @Param('slotId', ParseIntPipe) slotId: number,
     @Request() req,
   ) {
-    const doctor = await this.availabilityService.getDoctorById(doctorId);
+    const doctor = await this.availabilityService.getDoctorById(id);
 
     if (doctor.user.id !== req.user.id) {
       throw new HttpException('Only the doctor can delete this slot', HttpStatus.FORBIDDEN);
     }
 
-    return this.availabilityService.deleteSlot(slotId, doctorId);
+    return this.availabilityService.deleteSlot(slotId, id);
   }
 
 @Get(':id/sub-slots/:date')
 @Roles('doctor')
 async getAvailableSubSlots(
-  @Param('id', ParseIntPipe) doctorId: number,
+  @Param('id', ParseIntPipe) id: number,
   @Param('date') date: string
 ) {
-  return this.availabilityService.getAvailableSubSlots(doctorId, date);
+  return this.availabilityService.getAvailableSubSlots(id, date);
 }
 
 @Patch(':id/slots/:slotId')
 @Roles('doctor')
   async rescheduleSlot(
-    @Param('id', ParseIntPipe) doctorId: number,
+    @Param('id', ParseIntPipe) id: number,
     @Param('slotId', ParseIntPipe) slotId: number,
     @Request() req,
     @Body() updateData: {
@@ -95,44 +95,44 @@ async getAvailableSubSlots(
       mode?: string;
     },
   ) {
-    const doctor = await this.availabilityService.getDoctorById(doctorId);
+    const doctor = await this.availabilityService.getDoctorById(id);
 
     if (doctor.user.id !== req.user.id) {
       throw new HttpException('Only the doctor can update this slot', HttpStatus.FORBIDDEN);
     }
 
-    return this.availabilityService.rescheduleSlot(doctorId, slotId, updateData);
+    return this.availabilityService.rescheduleSlot(id, slotId, updateData);
   }
 
 @Delete(':id/recurring/:recurringId')
 @Roles('doctor')
 async deleteRecurringSlots(
-  @Param('id', ParseIntPipe) doctorId: number,
+  @Param('id', ParseIntPipe) id: number,
   @Param('recurringId') recurringId: string,
   @Request() req,
 ) {
-  const doctor = await this.availabilityService.getDoctorById(doctorId);
+  const doctor = await this.availabilityService.getDoctorById(id);
 
   if (doctor.user.id !== req.user.id) {
     throw new HttpException('Only the doctor can delete these slots', HttpStatus.FORBIDDEN);
   }
 
-  return this.availabilityService.deleteRecurringSlots(doctorId, recurringId);
+  return this.availabilityService.deleteRecurringSlots(id, recurringId);
 }
 @Delete(':id/recurring/:recurringId/from/:date')
 @Roles('doctor')
 async deleteRecurringSlotsFromDate(
-  @Param('id', ParseIntPipe) doctorId: number,
+  @Param('id', ParseIntPipe) id: number,
   @Param('recurringId') recurringId: string,
   @Param('date') date: string,
   @Request() req,
 ) {
-  const doctor = await this.availabilityService.getDoctorById(doctorId);
+  const doctor = await this.availabilityService.getDoctorById(id);
 
   if (doctor.user.id !== req.user.id) {
     throw new HttpException('Only the doctor can delete these slots', HttpStatus.FORBIDDEN);
   }
 
-  return this.availabilityService.deleteRecurringSlotsFromDate(doctorId, recurringId, date);
+  return this.availabilityService.deleteRecurringSlotsFromDate(id, recurringId, date);
 }
 }

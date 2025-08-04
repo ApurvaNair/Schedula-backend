@@ -17,6 +17,7 @@ import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { Appointment } from './entities/appointment.entity';
 import { Repository } from 'typeorm';
 import { AvailabilityService } from 'src/availability/availability.service';
+import { Roles } from 'src/auth/roles.decorator';
 
 @Controller('api/appointments')
 export class AppointmentController {
@@ -64,6 +65,15 @@ async finalizeUrgency(
   @Request() req
 ) {
   return await this.availabilityService.finalizeUrgency(appointmentId, isUrgent,req.user);
+}
+
+@Patch('/:id/confirm-new-time')
+@Roles('patient')
+async confirmNewTime(
+  @Param('id', ParseIntPipe) appointmentId: number,
+  @Body('confirmedTime') confirmedTime: string,
+) {
+  return this.availabilityService.confirmNewTime(appointmentId, confirmedTime);
 }
 
 }
