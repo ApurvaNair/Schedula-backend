@@ -34,4 +34,9 @@ export class Appointment {
   endTime: string;
   date: any;
   reason: string;
+  time: string;
+
+  @Column({ default: false }) 
+  isConfirmed: boolean;
+  
 }

@@ -8,6 +8,7 @@ import {
   UseGuards,
   ForbiddenException,
   Query,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { DoctorService } from './doctor.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -45,8 +46,9 @@ export class DoctorController {
     return this.doctorService.listDoctors(first_name, specialization);
   }
 
-  @Get(':id')
-  async getDoctor(@Param('id') id: number) {
-    return this.doctorService.getDoctorById(id);
-  }
+ @Get(':id')
+async getDoctor(@Param('id', ParseIntPipe) id: number) {
+  return this.doctorService.getDoctorById(id);
+}
+
 }
