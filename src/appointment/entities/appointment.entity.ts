@@ -39,4 +39,7 @@ export class Appointment {
   @Column({ default: false }) 
   isConfirmed: boolean;
   
+  @Column({ type: 'timestamp', nullable: true })
+  confirmationRequestedAt: Date;
+
 }
