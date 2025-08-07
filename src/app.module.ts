@@ -6,8 +6,10 @@ import { DoctorModule } from './doctors/doctor.module';
 import { PatientModule } from './patients/patient.module';
 import { AvailabilityModule } from './availability/availability.module';
 import { AppointmentModule } from './appointment/appointment.module';
+import { AppController } from './app.controller';
 
 @Module({
+  controllers: [AppController],
   imports: [
     ConfigModule.forRoot({
       isGlobal: true, 
