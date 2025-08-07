@@ -7,6 +7,7 @@ import { PatientModule } from './patients/patient.module';
 import { AvailabilityModule } from './availability/availability.module';
 import { AppointmentModule } from './appointment/appointment.module';
 import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 @Module({
   controllers: [AppController],
@@ -39,5 +40,6 @@ import { AppController } from './app.controller';
     AvailabilityModule,
     AppointmentModule
   ],
+   providers: [AppService],
 })
 export class AppModule {}
