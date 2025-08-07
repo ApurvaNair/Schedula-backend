@@ -67,13 +67,13 @@ async finalizeUrgency(
   return await this.availabilityService.finalizeUrgency(appointmentId, isUrgent,req.user);
 }
 
-@Patch('/:id/confirm-new-time')
-@Roles('patient')
-async confirmNewTime(
-  @Param('id', ParseIntPipe) appointmentId: number,
-  @Body('confirmedTime') confirmedTime: string,
-) {
-  return this.availabilityService.confirmNewTime(appointmentId, confirmedTime);
-}
+// @Patch('/:id/confirm-new-time')
+// @Roles('patient')
+// async confirmNewTime(
+//   @Param('id', ParseIntPipe) appointmentId: number,
+//   @Body('confirmedTime') confirmedTime: string,
+// ) {
+//   return this.availabilityService.confirmNewTime(appointmentId, confirmedTime);
+// }
 
 }
