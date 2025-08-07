@@ -185,76 +185,101 @@ private async handleStreamMode(
 }
 
   private async handleWaveMode(
-    slot: Slot,
-    start: dayjs.Dayjs,
-    newEnd: dayjs.Dayjs,
-    inside: Appointment[],
-    affected: Appointment[],
-    totalMinutes: number,
-    totalToFit: number,
-  ) {
-    const waveInterval = slot.slotDuration || 10; // original wave duration
-    const waveCount = Math.floor(totalMinutes / waveInterval);
+  slot: Slot,
+  start: dayjs.Dayjs,
+  newEnd: dayjs.Dayjs,
+  inside: Appointment[],
+  affected: Appointment[],
+  totalMinutes: number,
+  totalToFit: number,
+) {
+  const waveInterval = slot.slotDuration || 10;
 
-    if (waveCount < 1) {
-      throw new HttpException('Not enough time for even one wave', HttpStatus.BAD_REQUEST);
-    }
-
-    const newMaxBookings = Math.ceil(totalToFit / waveCount);
-    const statuses: { id: number; action: string }[] = [];
-    const all = [...inside, ...affected];
-    let pointer = start.clone();
-
-    let waveMap: Record<string, Appointment[]> = {};
-
-    for (let i = 0; i < waveCount; i++) {
-      const waveStartTime = pointer.clone();
-      const waveKey = waveStartTime.format('HH:mm');
-      waveMap[waveKey] = [];
-      pointer = pointer.add(waveInterval, 'minute');
-    }
-
-    const waveKeys = Object.keys(waveMap);
-    let waveIndex = 0;
-
-    for (const appt of all) {
-      while (
-        waveIndex < waveKeys.length &&
-        waveMap[waveKeys[waveIndex]].length >= newMaxBookings
-      ) {
-        waveIndex++;
-      }
-
-      if (waveIndex < waveKeys.length) {
-        const waveStart = waveKeys[waveIndex];
-        const waveTime = dayjs(`${slot.date}T${waveStart}`);
-        appt.startTime = waveTime.format('HH:mm');
-        appt.endTime = waveTime.add(waveInterval, 'minute').format('HH:mm');
-        appt.isConfirmed = true;
-        waveMap[waveStart].push(appt);
-        await this.appointmentRepo.save(appt);
-        statuses.push({ id: appt.id, action: `rescheduled-wave-${waveStart}` });
-      } else {
-        // No buffering in wave mode, all must fit
-        appt.isConfirmed = false;
-        await this.appointmentRepo.save(appt);
-        statuses.push({ id: appt.id, action: 'cancel-or-reschedule' });
-      }
-    }
-
-    slot.endTime = newEnd.format('HH:mm');
-    slot.maxBookings = newMaxBookings;
-    await this.slotRepo.save(slot);
-
-    return {
-      message: 'Slot shrunk in wave mode',
-      slotUpdated: {
-        newEndTime: slot.endTime,
-        newMaxBookings: newMaxBookings,
-      },
-      statuses,
-    };
+  if (waveInterval < 5) {
+    throw new HttpException('Slot duration must be at least 5 minutes', HttpStatus.BAD_REQUEST);
   }
+
+  const waveCount = Math.floor(totalMinutes / waveInterval);
+
+  if (waveCount < 1) {
+    throw new HttpException('Not enough time for even one wave', HttpStatus.BAD_REQUEST);
+  }
+
+  const newMaxBookings = Math.ceil(totalToFit / waveCount);
+  const statuses: { id: number; action: string }[] = [];
+
+  // Generate wave slots
+  let pointer = start.clone();
+  const waveMap: Record<string, Appointment[]> = {};
+  const waveTimes: dayjs.Dayjs[] = [];
+
+  for (let i = 0; i < waveCount; i++) {
+    const waveStartTime = pointer.clone();
+    const waveKey = waveStartTime.format('HH:mm');
+    waveMap[waveKey] = [];
+    waveTimes.push(waveStartTime);
+    pointer = pointer.add(waveInterval, 'minute');
+  }
+
+  // Pre-fill waveMap with inside appointments
+  for (const appt of inside) {
+    const waveKey = dayjs(`${slot.date}T${appt.startTime}`).format('HH:mm');
+    if (waveMap[waveKey]) {
+      waveMap[waveKey].push(appt);
+    }
+  }
+
+  // Sort affected appointments by original start time (optional)
+  affected.sort((a, b) =>
+    dayjs(`${slot.date}T${a.startTime}`).diff(dayjs(`${slot.date}T${b.startTime}`))
+  );
+
+  for (const appt of affected) {
+    const originalTime = dayjs(`${slot.date}T${appt.startTime}`);
+
+    // Find the best (closest) available wave
+    let bestWaveTime: dayjs.Dayjs | null = null;
+    let minDiff = Number.MAX_SAFE_INTEGER;
+
+    for (const waveStart of waveTimes) {
+      const waveKey = waveStart.format('HH:mm');
+      const diff = Math.abs(originalTime.diff(waveStart, 'minute'));
+
+      if (waveMap[waveKey].length < newMaxBookings && diff < minDiff) {
+        minDiff = diff;
+        bestWaveTime = waveStart;
+      }
+    }
+
+    if (bestWaveTime) {
+      const waveKey = bestWaveTime.format('HH:mm');
+      appt.startTime = bestWaveTime.format('HH:mm');
+      appt.endTime = bestWaveTime.add(waveInterval, 'minute').format('HH:mm');
+      appt.isConfirmed = true;
+      waveMap[waveKey].push(appt);
+      await this.appointmentRepo.save(appt);
+      statuses.push({ id: appt.id, action: `rescheduled-wave-${waveKey}` });
+    } else {
+      appt.isConfirmed = false;
+      await this.appointmentRepo.save(appt);
+      statuses.push({ id: appt.id, action: 'cancel-or-reschedule' });
+    }
+  }
+
+  // Update slot timing and booking cap
+  slot.endTime = newEnd.format('HH:mm');
+  slot.maxBookings = newMaxBookings;
+  await this.slotRepo.save(slot);
+
+  return {
+    message: 'Slot shrunk in wave mode',
+    slotUpdated: {
+      newEndTime: slot.endTime,
+      newMaxBookings: newMaxBookings,
+    },
+    statuses,
+  };
+}
 
 // async generateSubslots(
 //   startTime: Date,
@@ -617,7 +642,7 @@ async rescheduleSlot(
   return this.slotRepo.save(slot);
 }
 
- async getAvailableSubSlots(doctorId: number, date: string) {
+async getAvailableSubSlots(doctorId: number, date: string) {
   const sessions = await this.slotRepo.find({
     where: { doctor: { id: doctorId }, date },
   });
@@ -628,6 +653,8 @@ async rescheduleSlot(
     .where('slot.doctorId = :doctorId', { doctorId })
     .andWhere('slot.date = :date', { date })
     .getMany();
+
+  const now = dayjs();
 
   const result: {
     sessionId: number;
@@ -645,6 +672,12 @@ async rescheduleSlot(
       const en = t.add(s.slotDuration, 'minute');
 
       if (en.isAfter(end)) break;
+
+      // Validation 1: Skip expired sub-slots
+      if (en.isBefore(now)) {
+        t = t.add(s.slotDuration, 'minute');
+        continue;
+      }
 
       const isBooked = appointments.some((a) => {
         const apptStart = dayjs(`${a.slot.date}T${a.startTime}`);
@@ -747,7 +780,6 @@ async finalizeUrgency(
     return { message: 'Urgent appointment moved to buffer slot successfully.' };
   }
 
-  // No buffer slot available — mark as unconfirmed
   appointment.isConfirmed = false;
   appointment.isUrgencyFinalized = true;
   await this.appointmentRepo.save(appointment);
