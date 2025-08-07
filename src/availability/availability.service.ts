@@ -10,7 +10,6 @@ import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 import { v4 as uuidv4 } from 'uuid';
 import { AppointmentService } from 'src/appointment/appointment.service';
-import { Cron, CronExpression } from '@nestjs/schedule';
 
 dayjs.extend(isSameOrBefore);
 dayjs.extend(isSameOrAfter);
@@ -106,25 +105,21 @@ private async handleStreamMode(
 ) {
   const statuses: { id: number; action: string; message?: string }[] = [];
 
-  // Step 1: Combine inside + affected appointments
-  const sortedInside = inside.sort((a, b) => a.id - b.id); // FCFS
+  const sortedInside = inside.sort((a, b) => a.id - b.id);
   const sortedAffected = affected.sort((a, b) => {
     const aEmergency = a.isUrgencyFinalized === true;
     const bEmergency = b.isUrgencyFinalized === true;
-    if (aEmergency !== bEmergency) return aEmergency ? 1 : -1; // emergencies later
+    if (aEmergency !== bEmergency) return aEmergency ? 1 : -1; 
     return a.id - b.id;
   });
 
   const allAppointments = [...sortedInside, ...sortedAffected];
 
-  // Step 2: Calculate valid subslot duration for how many can fit
   const { subslotDuration, finalToFit } = this.calculateSubslotDuration(totalMinutes, allAppointments.length);
 
-  // Step 3: Slice into fitting and overflow groups
   const appointmentsToFit = allAppointments.slice(0, finalToFit);
   const overflowAppointments = allAppointments.slice(finalToFit);
 
-  // Step 4: Reassign subslot times to appointments that fit
   let currentTime = start;
   for (const appointment of appointmentsToFit) {
     const newStart = currentTime;
@@ -137,10 +132,8 @@ private async handleStreamMode(
     await this.appointmentRepo.save(appointment);
   }
 
-  // Step 5: Handle overflow appointments
   for (const appointment of overflowAppointments) {
     if (appointment.isUrgencyFinalized === true) {
-      // Emergency – try moving to buffer
       const buffer = slot.appointments.find(a => a.slot?.type === 'buffer');
       if (buffer) {
         appointment.startTime = buffer.startTime;
@@ -159,7 +152,6 @@ private async handleStreamMode(
         );
       }
     } else {
-      // Non-emergency – cancel or ask patient to reschedule
       appointment.isConfirmed = false;
       await this.appointmentRepo.save(appointment);
 
@@ -171,13 +163,11 @@ private async handleStreamMode(
     }
   }
 
-  // Step 6: Remove old buffer appointments (clean up)
   const bufferAppointments = slot.appointments.filter(a => a.slot?.type === 'buffer');
   for (const buffer of bufferAppointments) {
     await this.appointmentRepo.remove(buffer);
   }
 
-  // Step 7: Update slot end time
   slot.endTime = newEnd.format('HH:mm');
   await this.slotRepo.save(slot);
 
@@ -208,7 +198,6 @@ private async handleStreamMode(
   const newMaxBookings = Math.ceil(totalToFit / waveCount);
   const statuses: { id: number; action: string }[] = [];
 
-  // Generate wave slots
   let pointer = start.clone();
   const waveMap: Record<string, Appointment[]> = {};
   const waveTimes: dayjs.Dayjs[] = [];
@@ -221,7 +210,6 @@ private async handleStreamMode(
     pointer = pointer.add(waveInterval, 'minute');
   }
 
-  // Pre-fill waveMap with inside appointments
   for (const appt of inside) {
     const waveKey = dayjs(`${slot.date}T${appt.startTime}`).format('HH:mm');
     if (waveMap[waveKey]) {
@@ -229,7 +217,6 @@ private async handleStreamMode(
     }
   }
 
-  // Sort affected appointments by original start time (optional)
   affected.sort((a, b) =>
     dayjs(`${slot.date}T${a.startTime}`).diff(dayjs(`${slot.date}T${b.startTime}`))
   );
@@ -280,108 +267,6 @@ private async handleStreamMode(
     statuses,
   };
 }
-
-// async generateSubslots(
-//   startTime: Date,
-//   endTime: Date,
-//   durationInMinutes: number
-// ): Promise<{ start: Date; end: Date }[]> {
-//   const subslots: { start: Date; end: Date }[] = []; 
-//   let current = dayjs(startTime);
-//   const end = dayjs(endTime);
-
-//   while (current.add(durationInMinutes, 'minute').isSameOrBefore(end)) {
-//     const subslotStart = current.toDate();
-//     const subslotEnd = current.add(durationInMinutes, 'minute').toDate();
-//     subslots.push({ start: subslotStart, end: subslotEnd });
-//     current = current.add(durationInMinutes, 'minute');
-//   }
-
-//   return subslots;
-// }
-
-
-// async confirmNewTime(appointmentId: number, confirmedTime: string) {
-//   const appointment = await this.appointmentRepo.findOne({
-//     where: { id: appointmentId },
-//     relations: ['slot'],
-//   });
-
-//   if (!appointment) {
-//     throw new HttpException('Appointment not found', HttpStatus.NOT_FOUND);
-//   }
-
-//   const now = dayjs();
-//   const slot = appointment.slot;
-//   const slotDate = slot.date;
-//   const confirmTime = dayjs(`${slotDate}T${confirmedTime}`);
-
-//   if (confirmTime.diff(now, 'minute') < 30) {
-//     throw new HttpException('Selected time must be at least 30 minutes in the future', HttpStatus.BAD_REQUEST);
-//   }
-
-//   const slotStart = dayjs(`${slot.date}T${slot.startTime}`);
-//   const slotEnd = dayjs(`${slot.date}T${slot.endTime}`);
-//   const slotDuration = slot.slotDuration;
-
-//   const confirmEnd = confirmTime.add(slotDuration, 'minute');
-
-//   if (confirmTime.isBefore(slotStart) || confirmEnd.isAfter(slotEnd)) {
-//     throw new HttpException(
-//       `Confirmed time must be within slot window: ${slot.startTime} to ${slot.endTime}`,
-//       HttpStatus.BAD_REQUEST
-//     );
-//   }
-
-//   const appointments = await this.appointmentRepo
-//     .createQueryBuilder('appointment')
-//     .leftJoinAndSelect('appointment.slot', 'slot')
-//     .where('slot.id = :slotId', { slotId: slot.id })
-//     .andWhere('slot.date = :date', { date: slot.date })
-//     .getMany();
-
-//   const availableSubSlots: string[] = [];
-
-//   let t = dayjs(`${slot.date}T${slot.startTime}`);
-//   while (t.add(slotDuration, 'minute').isSameOrBefore(slotEnd)) {
-//     const st = t; // current slot start
-//     const en = t.add(slotDuration, 'minute'); // next slot end
-
-//     const isBooked = appointments.some((a) => {
-//       const apptStart = dayjs(`${a.slot.date}T${a.startTime}`);
-//       const apptEnd = dayjs(`${a.slot.date}T${a.endTime}`);
-//       return (
-//         a.id !== appointment.id && 
-//         st.isBefore(apptEnd) &&
-//         en.isAfter(apptStart)
-//       );
-//     });
-
-//     if (!isBooked) {
-//       availableSubSlots.push(st.format('HH:mm'));
-//     }
-
-//     t = t.add(slotDuration, 'minute'); // update time for next iteration
-//   }
-
-//   if (!availableSubSlots.includes(confirmedTime)) {
-//     throw new HttpException(
-//       `Confirmed time must match one of the available sub-slots: ${availableSubSlots.join(', ')}`,
-//       HttpStatus.BAD_REQUEST
-//     );
-//   }
-
-//   appointment.startTime = confirmedTime;
-//   appointment.endTime = confirmEnd.format('HH:mm');
-
-//   await this.appointmentRepo.save(appointment);
-
-//   return {
-//     message: 'Appointment confirmed with new time',
-//     newStartTime: appointment.startTime,
-//     newEndTime: appointment.endTime,
-//   };
-// }
 
   async getDoctorSlots(doctorId: number): Promise<Slot[]> {
     return this.slotRepo.find({
@@ -673,7 +558,6 @@ async getAvailableSubSlots(doctorId: number, date: string) {
 
       if (en.isAfter(end)) break;
 
-      // Validation 1: Skip expired sub-slots
       if (en.isBefore(now)) {
         t = t.add(s.slotDuration, 'minute');
         continue;
@@ -705,24 +589,6 @@ async getAvailableSubSlots(doctorId: number, date: string) {
   return result;
 }
 
-// @Cron(CronExpression.EVERY_MINUTE)
-// async handleUnconfirmedTimeouts() {
-//   const timeoutThreshold = dayjs().subtract(5, 'minute').toDate();
-
-//   const result = await this.appointmentRepo
-//     .createQueryBuilder()
-//     .delete()
-//     .from(Appointment)
-//     .where('is_confirmed = false')
-//     .andWhere('confirmation_requested_at IS NOT NULL')
-//     .andWhere('confirmation_requested_at <= :timeout', { timeout: timeoutThreshold })
-//     .execute();
-
-//   if (result.affected && result.affected > 0) {
-//     console.log(`Timeout: Removed ${result.affected} unconfirmed appointment(s).`);
-//   }
-// }
-
 async finalizeUrgency(
   appointmentId: number,
   isUrgent: boolean,
@@ -752,10 +618,8 @@ async finalizeUrgency(
     };
   }
 
-  // For urgent case
   appointment.priority = 1;
 
-  // Try moving to buffer slot
   const bufferSlot = await this.slotRepo.findOne({
     where: {
       doctor: appointment.slot.doctor,
