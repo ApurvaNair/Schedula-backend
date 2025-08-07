@@ -32,11 +32,18 @@ export class Appointment {
 
   @Column()
   endTime: string;
-  date: any;
+
+  @Column({ type: 'date', nullable: true })
+  date: string;
+  
+  @Column({ nullable: true })
   reason: string;
+
+  @Column({ nullable: true })
   time: string;
 
   @Column({ default: false }) 
   isConfirmed: boolean;
   
+
 }
