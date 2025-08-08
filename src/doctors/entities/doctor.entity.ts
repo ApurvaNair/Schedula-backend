@@ -35,7 +35,10 @@ export class Doctor {
 
   @Column({ nullable: true })
   bio: string;
-z
+
+  @Column({ default: false })
+  suggestNextAvailable: boolean;
+
   @OneToMany(() => Slot, (slot) => slot.doctor)
   slots: Slot[];
 }

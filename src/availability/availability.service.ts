@@ -183,12 +183,14 @@ private async handleStreamMode(
   totalMinutes: number,
   totalToFit: number,
 ) {
-  const waveInterval = slot.slotDuration || 10;
+  let waveInterval = slot.slotDuration || 10;
 
-  if (waveInterval < 5) {
-    throw new HttpException('Slot duration must be at least 5 minutes', HttpStatus.BAD_REQUEST);
+  let minutesPerPatient = totalMinutes / totalToFit;
+  if (minutesPerPatient < 5) {
+    totalToFit = Math.floor(totalMinutes / 5);
+    minutesPerPatient = totalMinutes / totalToFit;
   }
-
+  waveInterval = Math.max(waveInterval, Math.ceil(minutesPerPatient));
   const waveCount = Math.floor(totalMinutes / waveInterval);
 
   if (waveCount < 1) {
@@ -210,10 +212,48 @@ private async handleStreamMode(
     pointer = pointer.add(waveInterval, 'minute');
   }
 
+  inside.sort((a, b) =>
+    dayjs(`${slot.date}T${a.startTime}`).diff(dayjs(`${slot.date}T${b.startTime}`))
+  );
+
   for (const appt of inside) {
-    const waveKey = dayjs(`${slot.date}T${appt.startTime}`).format('HH:mm');
-    if (waveMap[waveKey]) {
+    const originalTime = dayjs(`${slot.date}T${appt.startTime}`);
+    const waveKey = originalTime.format('HH:mm');
+
+    if (waveMap[waveKey] && waveMap[waveKey].length < newMaxBookings) {
       waveMap[waveKey].push(appt);
+      appt.startTime = waveKey;
+      appt.endTime = originalTime.add(waveInterval, 'minute').format('HH:mm');
+      appt.isConfirmed = true;
+      await this.appointmentRepo.save(appt);
+      statuses.push({ id: appt.id, action: `retained-in-wave-${waveKey}` });
+    } else {
+      let bestWaveTime: dayjs.Dayjs | null = null;
+      let minDiff = Number.MAX_SAFE_INTEGER;
+
+      for (const waveStart of waveTimes) {
+        const key = waveStart.format('HH:mm');
+        const diff = Math.abs(originalTime.diff(waveStart, 'minute'));
+
+        if (waveMap[key].length < newMaxBookings && diff < minDiff) {
+          minDiff = diff;
+          bestWaveTime = waveStart;
+        }
+      }
+
+      if (bestWaveTime) {
+        const newWaveKey = bestWaveTime.format('HH:mm');
+        appt.startTime = newWaveKey;
+        appt.endTime = bestWaveTime.add(waveInterval, 'minute').format('HH:mm');
+        appt.isConfirmed = true;
+        waveMap[newWaveKey].push(appt);
+        await this.appointmentRepo.save(appt);
+        statuses.push({ id: appt.id, action: `reassigned-from-${waveKey}-to-${newWaveKey}` });
+      } else {
+        appt.isConfirmed = false;
+        await this.appointmentRepo.save(appt);
+        statuses.push({ id: appt.id, action: `cancel-inside-no-space` });
+      }
     }
   }
 
@@ -224,7 +264,6 @@ private async handleStreamMode(
   for (const appt of affected) {
     const originalTime = dayjs(`${slot.date}T${appt.startTime}`);
 
-    // Find the best (closest) available wave
     let bestWaveTime: dayjs.Dayjs | null = null;
     let minDiff = Number.MAX_SAFE_INTEGER;
 
@@ -240,7 +279,7 @@ private async handleStreamMode(
 
     if (bestWaveTime) {
       const waveKey = bestWaveTime.format('HH:mm');
-      appt.startTime = bestWaveTime.format('HH:mm');
+      appt.startTime = waveKey;
       appt.endTime = bestWaveTime.add(waveInterval, 'minute').format('HH:mm');
       appt.isConfirmed = true;
       waveMap[waveKey].push(appt);
@@ -253,7 +292,6 @@ private async handleStreamMode(
     }
   }
 
-  // Update slot timing and booking cap
   slot.endTime = newEnd.format('HH:mm');
   slot.maxBookings = newMaxBookings;
   await this.slotRepo.save(slot);
@@ -262,7 +300,7 @@ private async handleStreamMode(
     message: 'Slot shrunk in wave mode',
     slotUpdated: {
       newEndTime: slot.endTime,
-      newMaxBookings: newMaxBookings,
+      newMaxBookings,
     },
     statuses,
   };
@@ -528,6 +566,15 @@ async rescheduleSlot(
 }
 
 async getAvailableSubSlots(doctorId: number, date: string) {
+  const doctor = await this.doctorRepo.findOne({
+    where: { id: doctorId },
+    select: ['suggestNextAvailable'], 
+  });
+
+  if (!doctor) {
+    throw new NotFoundException('Doctor not found');
+  }
+
   const sessions = await this.slotRepo.find({
     where: { doctor: { id: doctorId }, date },
   });
@@ -540,7 +587,6 @@ async getAvailableSubSlots(doctorId: number, date: string) {
     .getMany();
 
   const now = dayjs();
-
   const result: {
     sessionId: number;
     subSlotId: string;
@@ -548,45 +594,240 @@ async getAvailableSubSlots(doctorId: number, date: string) {
     endTime: string;
   }[] = [];
 
-  for (const s of sessions) {
-    let t = dayjs(`${s.date}T${s.startTime}`);
-    const end = dayjs(`${s.date}T${s.endTime}`);
+  let latestEndTime: string | null = null;
 
-    while (t.isBefore(end)) {
+  for (const session of sessions) {
+    const start = dayjs(`${session.date}T${session.startTime}`);
+    const end = dayjs(`${session.date}T${session.endTime}`);
+    const duration = session.slotDuration;
+    const mode = session.mode;
+    const max = session.maxBookings ?? 1;
+
+    let t = start;
+    while (t.add(duration, 'minute').isSameOrBefore(end)) {
       const st = t;
-      const en = t.add(s.slotDuration, 'minute');
-
-      if (en.isAfter(end)) break;
+      const en = t.add(duration, 'minute');
 
       if (en.isBefore(now)) {
-        t = t.add(s.slotDuration, 'minute');
+        t = en;
         continue;
       }
 
-      const isBooked = appointments.some((a) => {
-        const apptStart = dayjs(`${a.slot.date}T${a.startTime}`);
-        const apptEnd = dayjs(`${a.slot.date}T${a.endTime}`);
-        return (
-          a.slot.id === s.id &&
-          st.isBefore(apptEnd) &&
-          en.isAfter(apptStart)
-        );
-      });
+      if (mode === 'wave') {
+        const count = appointments.filter(a =>
+          a.slot.id === session.id &&
+          a.startTime === st.format('HH:mm')
+        ).length;
 
-      if (!isBooked) {
-        result.push({
-          sessionId: s.id,
-          subSlotId: `${s.id}_${st.format('HHmm')}_${en.format('HHmm')}`,
-          startTime: st.format('HH:mm'),
-          endTime: en.format('HH:mm'),
+        if (count < max) {
+          result.push({
+            sessionId: session.id,
+            subSlotId: `${session.id}_${st.format('HHmm')}_${en.format('HHmm')}`,
+            startTime: st.format('HH:mm'),
+            endTime: en.format('HH:mm'),
+          });
+        }
+
+      } else {
+        const isBooked = appointments.some(a => {
+          return (
+            a.slot.id === session.id &&
+            st.isBefore(dayjs(`${a.slot.date}T${a.endTime}`)) &&
+            en.isAfter(dayjs(`${a.slot.date}T${a.startTime}`))
+          );
         });
+
+        if (!isBooked) {
+          result.push({
+            sessionId: session.id,
+            subSlotId: `${session.id}_${st.format('HHmm')}_${en.format('HHmm')}`,
+            startTime: st.format('HH:mm'),
+            endTime: en.format('HH:mm'),
+          });
+        }
       }
 
-      t = t.add(s.slotDuration, 'minute');
+      latestEndTime = en.format('HH:mm');
+      t = en;
     }
   }
 
+  if (result.length === 0) {
+    if (!doctor.suggestNextAvailable) {
+      return {
+        message: 'No slots available',
+      };
+    }
+
+    const nextAvailable = await this.findNextAvailableSlot(doctorId, date, latestEndTime || '00:00');
+
+    return {
+      message: nextAvailable
+        ? `No available slots on ${date}. Next available is on ${nextAvailable.date} at ${nextAvailable.startTime}`
+        : 'No available slots found.',
+      nextAvailable,
+    };
+  }
+
   return result;
+}
+
+async checkSlotAvailability(
+  doctorId: number,
+  date: string,
+  startTime: string,
+  endTime: string,
+  isNextAvailable: boolean,
+) {
+  const slot = await this.slotRepo.findOne({
+    where: {
+      doctor: { id: doctorId },
+      date,
+      startTime,
+      endTime,
+    },
+    relations: ['appointments'],
+  });
+
+  if (!slot) throw new NotFoundException('Slot not found');
+
+  const now = dayjs();
+  const slotStart = dayjs(`${slot.date}T${slot.startTime}`);
+  const slotEnd = dayjs(`${slot.date}T${slot.endTime}`);
+  const duration = slot.slotDuration || 10;
+
+  if (slotEnd.isBefore(now)) {
+    return { message: 'Slot time has already passed' };
+  }
+
+  let isAvailable = false;
+
+  if (slot.mode === 'stream') {
+    let t = slotStart;
+    while (t.add(duration, 'minute').isSameOrBefore(slotEnd)) {
+      const st = t;
+      const en = t.add(duration, 'minute');
+
+      const conflict = slot.appointments.some(a =>
+        st.isBefore(dayjs(`${slot.date}T${a.endTime}`)) &&
+        en.isAfter(dayjs(`${slot.date}T${a.startTime}`))
+      );
+
+      if (!conflict) {
+        isAvailable = true;
+        break;
+      }
+
+      t = en;
+    }
+  } else if (slot.mode === 'wave') {
+    let t = slotStart;
+    const max = slot.maxBookings ?? 1;
+
+    while (t.add(duration, 'minute').isSameOrBefore(slotEnd)) {
+      const timeStr = t.format('HH:mm');
+      const count = slot.appointments.filter(a => a.startTime === timeStr).length;
+
+      if (count < max) {
+        isAvailable = true;
+        break;
+      }
+
+      t = t.add(duration, 'minute');
+    }
+  }
+
+  if (isAvailable) {
+    return { message: 'Slot is available' };
+  }
+
+  if (isNextAvailable) {
+    const nextAvailable = await this.findNextAvailableSlot(doctorId, date, endTime);
+    return {
+      message: nextAvailable
+        ? `Slot is fully booked. Next available slot is on ${nextAvailable.date} at ${nextAvailable.startTime}`
+        : 'No upcoming available slots found.',
+      nextAvailable,
+    };
+  }
+
+  return { message: 'Slot is fully booked' };
+}
+
+private async findNextAvailableSlot(doctorId: number, fromDate: string, afterTime: string) {
+  const after = dayjs(`${fromDate}T${afterTime}`);
+  const duration = 10;
+
+  const allSlots = await this.slotRepo.find({
+    where: { doctor: { id: doctorId }, date: Not(IsNull()) },
+    order: { date: 'ASC', startTime: 'ASC' },
+    relations: ['appointments'],
+  });
+
+  for (const slot of allSlots) {
+    const slotStart = dayjs(`${slot.date}T${slot.startTime}`);
+    const slotEnd = dayjs(`${slot.date}T${slot.endTime}`);
+    const dur = slot.slotDuration || duration;
+
+    if (slotEnd.isBefore(after)) continue;
+
+    if (slot.mode === 'stream') {
+      let t = slotStart;
+
+      while (t.add(dur, 'minute').isSameOrBefore(slotEnd)) {
+        const st = t;
+        const en = st.add(dur, 'minute');
+
+        if (en.isBefore(after)) {
+          t = en;
+          continue;
+        }
+
+        const conflict = slot.appointments.some(a =>
+          st.isBefore(dayjs(`${slot.date}T${a.endTime}`)) &&
+          en.isAfter(dayjs(`${slot.date}T${a.startTime}`))
+        );
+
+        if (!conflict) {
+          return {
+            slotId: slot.id,
+            date: slot.date,
+            startTime: st.format('HH:mm'),
+          };
+        }
+
+        t = en;
+      }
+
+    } else if (slot.mode === 'wave') {
+      let t = slotStart;
+      const max = slot.maxBookings ?? 1;
+
+      while (t.add(dur, 'minute').isSameOrBefore(slotEnd)) {
+        const timeStr = t.format('HH:mm');
+        const timeObj = dayjs(`${slot.date}T${timeStr}`);
+
+        if (timeObj.isBefore(after)) {
+          t = t.add(dur, 'minute');
+          continue;
+        }
+
+        const count = slot.appointments.filter(a => a.startTime === timeStr).length;
+
+        if (count < max) {
+          return {
+            slotId: slot.id,
+            date: slot.date,
+            startTime: timeStr,
+          };
+        }
+
+        t = t.add(dur, 'minute');
+      }
+    }
+  }
+
+  return null;
 }
 
 async finalizeUrgency(

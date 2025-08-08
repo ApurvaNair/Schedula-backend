@@ -84,17 +84,39 @@ export class AppointmentService {
       throw new HttpException('Appointment time is outside the current slot window', HttpStatus.BAD_REQUEST);
     }
 
-    const existing = await this.appointmentRepo.findOne({
-      where: {
-        slot: { id: slot.id },
-        startTime,
-        endTime,
-      },
-      relations: ['slot'],
-    });
-    if (existing) {
-      throw new HttpException('This slot is already booked. Please choose another time.', HttpStatus.CONFLICT);
-    }
+   // Check existing appointments based on slot type (stream or wave)
+if (slot.mode === 'stream') {
+  const existing = await this.appointmentRepo.findOne({
+    where: {
+      slot: { id: slot.id },
+      startTime,
+      endTime,
+    },
+    relations: ['slot'],
+  });
+
+  if (existing) {
+    throw new HttpException(
+      'This slot is already booked. Please choose another time.',
+      HttpStatus.CONFLICT,
+    );
+  }
+} else if (slot.mode === 'wave') {
+  const count = await this.appointmentRepo.count({
+    where: {
+      slot: { id: slot.id },
+      startTime,
+      endTime,
+    },
+  });
+
+  if (count >= (slot.maxBookings || 1)) {
+    throw new HttpException(
+      'This wave slot has reached maximum bookings. Please choose another time.',
+      HttpStatus.CONFLICT,
+    );
+  }
+}
 
     const existingAppointment = await this.appointmentRepo.findOne({
       where: {
@@ -156,7 +178,6 @@ export class AppointmentService {
   const slotEnd = dayjs(`${newSlot.date}T${newSlot.endTime}`);
   const now = dayjs();
 
-  // Allow only if new slot is not expired
   const slotHasEnded = slotEnd.isBefore(now);
   if (slotHasEnded) {
     throw new HttpException('Cannot reschedule into an expired slot', HttpStatus.BAD_REQUEST);

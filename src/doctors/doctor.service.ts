@@ -41,9 +41,10 @@ export class DoctorService {
     return doctor;
   }
 
-  async updateDoctorProfile(userId: number, dto: UpdateDoctorDto) {
-    const doctor = await this.getDoctorProfileByUserId(userId);
-    Object.assign(doctor, dto);
-    return this.doctorRepo.save(doctor);
-  }
+  async updateDoctorProfile(doctorId: number, dto: UpdateDoctorDto) {
+  const doctor = await this.getDoctorById(doctorId);
+  Object.assign(doctor, dto);
+  return this.doctorRepo.save(doctor);
+}
+
 }
