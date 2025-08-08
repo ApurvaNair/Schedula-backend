@@ -593,36 +593,56 @@ async getAvailableSubSlots(doctorId: number, date: string) {
     const start = dayjs(`${session.date}T${session.startTime}`);
     const end = dayjs(`${session.date}T${session.endTime}`);
     const duration = session.slotDuration;
+    const mode = session.mode;
+    const max = session.maxBookings ?? 1;
 
     let t = start;
     while (t.add(duration, 'minute').isSameOrBefore(end)) {
       const st = t;
       const en = t.add(duration, 'minute');
 
-      // Skip past sub-slots
       if (en.isBefore(now)) {
         t = en;
         continue;
       }
 
-      const isBooked = appointments.some(a => {
-        return (
+      if (mode === 'wave') {
+        // Count how many appointments already booked at this exact startTime
+        const count = appointments.filter(a =>
           a.slot.id === session.id &&
-          st.isBefore(dayjs(`${a.slot.date}T${a.endTime}`)) &&
-          en.isAfter(dayjs(`${a.slot.date}T${a.startTime}`))
-        );
-      });
+          a.startTime === st.format('HH:mm')
+        ).length;
 
-      if (!isBooked) {
-        result.push({
-          sessionId: session.id,
-          subSlotId: `${session.id}_${st.format('HHmm')}_${en.format('HHmm')}`,
-          startTime: st.format('HH:mm'),
-          endTime: en.format('HH:mm'),
+        if (count < max) {
+          result.push({
+            sessionId: session.id,
+            subSlotId: `${session.id}_${st.format('HHmm')}_${en.format('HHmm')}`,
+            startTime: st.format('HH:mm'),
+            endTime: en.format('HH:mm'),
+          });
+        }
+
+      } else {
+        // stream mode logic - allow only one booking per sub-slot
+        const isBooked = appointments.some(a => {
+          return (
+            a.slot.id === session.id &&
+            st.isBefore(dayjs(`${a.slot.date}T${a.endTime}`)) &&
+            en.isAfter(dayjs(`${a.slot.date}T${a.startTime}`))
+          );
         });
+
+        if (!isBooked) {
+          result.push({
+            sessionId: session.id,
+            subSlotId: `${session.id}_${st.format('HHmm')}_${en.format('HHmm')}`,
+            startTime: st.format('HH:mm'),
+            endTime: en.format('HH:mm'),
+          });
+        }
       }
 
-      latestEndTime = en.format('HH:mm'); 
+      latestEndTime = en.format('HH:mm');
       t = en;
     }
   }
