@@ -32,10 +32,6 @@ export class Appointment {
 
   @Column()
   endTime: string;
-<<<<<<< HEAD
-  date: any;
-  reason: string;
-=======
 
   @Column({ type: 'date', nullable: true })
   date: string;
@@ -44,14 +40,9 @@ export class Appointment {
   reason: string;
 
   @Column({ nullable: true })
->>>>>>> 035a70113281dbbc9838180b26f257195925df7a
   time: string;
 
   @Column({ default: false }) 
   isConfirmed: boolean;
   
-<<<<<<< HEAD
-=======
-
->>>>>>> 035a70113281dbbc9838180b26f257195925df7a
 }
