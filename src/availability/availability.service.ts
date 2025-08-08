@@ -292,7 +292,6 @@ private async handleStreamMode(
     }
   }
 
-  // Update slot info
   slot.endTime = newEnd.format('HH:mm');
   slot.maxBookings = newMaxBookings;
   await this.slotRepo.save(slot);
@@ -567,6 +566,15 @@ async rescheduleSlot(
 }
 
 async getAvailableSubSlots(doctorId: number, date: string) {
+  const doctor = await this.doctorRepo.findOne({
+    where: { id: doctorId },
+    select: ['suggestNextAvailable'], 
+  });
+
+  if (!doctor) {
+    throw new NotFoundException('Doctor not found');
+  }
+
   const sessions = await this.slotRepo.find({
     where: { doctor: { id: doctorId }, date },
   });
@@ -579,7 +587,6 @@ async getAvailableSubSlots(doctorId: number, date: string) {
     .getMany();
 
   const now = dayjs();
-
   const result: {
     sessionId: number;
     subSlotId: string;
@@ -607,7 +614,6 @@ async getAvailableSubSlots(doctorId: number, date: string) {
       }
 
       if (mode === 'wave') {
-        // Count how many appointments already booked at this exact startTime
         const count = appointments.filter(a =>
           a.slot.id === session.id &&
           a.startTime === st.format('HH:mm')
@@ -623,7 +629,6 @@ async getAvailableSubSlots(doctorId: number, date: string) {
         }
 
       } else {
-        // stream mode logic - allow only one booking per sub-slot
         const isBooked = appointments.some(a => {
           return (
             a.slot.id === session.id &&
@@ -648,6 +653,12 @@ async getAvailableSubSlots(doctorId: number, date: string) {
   }
 
   if (result.length === 0) {
+    if (!doctor.suggestNextAvailable) {
+      return {
+        message: 'No slots available',
+      };
+    }
+
     const nextAvailable = await this.findNextAvailableSlot(doctorId, date, latestEndTime || '00:00');
 
     return {
@@ -758,7 +769,6 @@ private async findNextAvailableSlot(doctorId: number, fromDate: string, afterTim
     const slotEnd = dayjs(`${slot.date}T${slot.endTime}`);
     const dur = slot.slotDuration || duration;
 
-    // skip slots before the current check time
     if (slotEnd.isBefore(after)) continue;
 
     if (slot.mode === 'stream') {
