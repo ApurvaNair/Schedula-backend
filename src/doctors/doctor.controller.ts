@@ -29,14 +29,14 @@ export class DoctorController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Patch('profile')
-  async updateProfile(@Req() req: any, @Body() dto: UpdateDoctorDto) {
-    if (req.user.role !== 'doctor') {
-      throw new ForbiddenException('Only doctors can update their profile');
-    }
-
-    return this.doctorService.updateDoctorProfile(req.user.id, dto);
+  @Patch('profile/:id')
+  async updateProfile(@Req() req: any, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdateDoctorDto) {
+  if (req.user.role !== 'doctor') {
+    throw new ForbiddenException('Only doctors can update their profile');
   }
+
+  return this.doctorService.updateDoctorProfile(id, dto);
+}
 
   @Get()
   async listDoctors(
